@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: curs-flask
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: curs-flask
+  template:
+    metadata:
+      labels:
+        app: curs-flask
+    spec:
+      containers:
+      - name: curs-flask
+        image: trojanul2008/curs-flask:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: curs-flask
+spec:
+  selector:
+    app: curs-flask
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 5000
+  type: LoadBalancer
