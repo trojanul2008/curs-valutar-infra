@@ -5,7 +5,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 5m
-  path: "./infrastructure/k8s"  # Must match your structure
+  path: "./infrastructure/k8s"
   prune: true
   sourceRef:
     kind: GitRepository
