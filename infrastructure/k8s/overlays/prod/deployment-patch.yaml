@@ -6,17 +6,25 @@ spec:
   replicas: 2
   template:
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 3000
+        fsGroup: 2000
+
       containers:
-        - name: curs-flask
-          image: trojanul2008/curs-flask:prod-latest
-          env:
-            - name: FLASK_ENV
-              value: "production"
-          resources:
-            requests:
-              memory: "128Mi"
-              cpu: "100m"
-            limits:
-              memory: "256Mi"
-              cpu: "500m"
+      - name: curs-flask
+        image: trojanul2008/curs-flask:prod-latest
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+        env:
+        - name: FLASK_ENV
+          value: "production"
+        resources:
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
 

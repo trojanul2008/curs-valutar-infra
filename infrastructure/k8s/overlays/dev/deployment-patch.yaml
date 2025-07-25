@@ -5,16 +5,25 @@ metadata:
 spec:
   template:
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 3000
+        fsGroup: 2000
+
       containers:
-        - name: curs-flask
-          image: trojanul2008/curs-flask:dev-latest
-          env:
-            - name: FLASK_ENV
-              value: "development"
-          resources:
-            requests:
-              memory: "64Mi"
-              cpu: "50m"
-            limits:
-              memory: "128Mi"
-              cpu: "250m"
+      - name: curs-flask
+        image: trojanul2008/curs-flask:dev-latest
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+        env:
+        - name: FLASK_ENV
+          value: "development"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+
