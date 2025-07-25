@@ -5,11 +5,16 @@ metadata:
 spec:
   template:
     spec:
+      # Pod‑level hardening for dev
+      securityContext:
+        runAsNonRoot: true
+        readOnlyRootFilesystem: true
+
       containers:
       - name: curs-flask
         image: trojanul2008/curs-flask:dev-latest
 
-        # Container-level hardening for dev
+        # Container‑level hardening for dev
         securityContext:
           runAsNonRoot: true
           readOnlyRootFilesystem: true

@@ -6,11 +6,16 @@ spec:
   replicas: 2
   template:
     spec:
+      # Pod‑level hardening for prod
+      securityContext:
+        runAsNonRoot: true
+        readOnlyRootFilesystem: true
+
       containers:
       - name: curs-flask
         image: trojanul2008/curs-flask:prod-latest
 
-        # Container-level hardening for prod
+        # Container‑level hardening for prod
         securityContext:
           runAsNonRoot: true
           readOnlyRootFilesystem: true
