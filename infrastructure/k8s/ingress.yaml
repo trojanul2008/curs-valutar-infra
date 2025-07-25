@@ -4,12 +4,12 @@ metadata:
   name: curs-flask-ingress
   namespace: default
   annotations:
-    # Specifică că foloseşte Traefik ca IngressClass
+    # Specifica ca foloseste Traefik ca IngressClass
     kubernetes.io/ingress.class: traefik
 spec:
   ingressClassName: traefik
   rules:
-    - host: exchange.istartit.com    # Schimbă cu DNS-ul sau IP-ul tău
+    - host: exchange.istartit.com    # Schimba cu DNS-ul sau IP-ul tau
       http:
         paths:
           - path: /
