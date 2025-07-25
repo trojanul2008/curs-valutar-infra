@@ -25,6 +25,10 @@ spec:
         prometheus.io/port: "5000"
         prometheus.io/path: "/metrics"
     spec:
+      securityContext:                   # <--- Adăugat aici (nivel Pod)
+        runAsNonRoot: true
+        runAsUser: 1000                 # <--- user non-root
+
       containers:
         - name: curs-flask
           image: REPLACE_ME
@@ -32,6 +36,7 @@ spec:
 
           securityContext:
             runAsNonRoot: true
+            runAsUser: 1000             # <--- user non-root
             readOnlyRootFilesystem: true
 
           ports:
