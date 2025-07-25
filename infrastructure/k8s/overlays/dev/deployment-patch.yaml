@@ -8,3 +8,10 @@ spec:
       containers:
       - name: curs-flask
         image: trojanul2008/curs-flask:dev-latest
+        env:
+        - name: FLASK_ENV
+          value: "development"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"

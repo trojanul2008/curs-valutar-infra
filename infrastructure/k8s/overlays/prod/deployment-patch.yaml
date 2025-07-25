@@ -3,8 +3,16 @@ kind: Deployment
 metadata:
   name: curs-flask
 spec:
+  replicas: 2
   template:
     spec:
       containers:
       - name: curs-flask
         image: trojanul2008/curs-flask:prod-latest
+        env:
+        - name: FLASK_ENV
+          value: "production"
+        resources:
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
