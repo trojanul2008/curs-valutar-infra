@@ -8,6 +8,12 @@ spec:
       containers:
       - name: curs-flask
         image: trojanul2008/curs-flask:dev-latest
+
+        # Container-level hardening for dev
+        securityContext:
+          runAsNonRoot: true
+          readOnlyRootFilesystem: true
+
         env:
         - name: FLASK_ENV
           value: "development"
@@ -15,3 +21,4 @@ spec:
           requests:
             memory: "64Mi"
             cpu: "50m"
+

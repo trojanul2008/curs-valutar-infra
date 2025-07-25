@@ -26,14 +26,21 @@ spec:
         prometheus.io/port: "5000"
         prometheus.io/path: "/metrics"
     spec:
+      # Pod-level hardening
       securityContext:
-        runAsUser: 1000
-        runAsGroup: 1000
-        fsGroup: 1000
+        runAsNonRoot: true
+        readOnlyRootFilesystem: true
+
       containers:
       - name: curs-flask
         image: trojanul2008/curs-flask:latest
         imagePullPolicy: Always
+
+        # Container-level hardening
+        securityContext:
+          runAsNonRoot: true
+          readOnlyRootFilesystem: true
+
         ports:
         - containerPort: 5000
         env:
@@ -78,3 +85,4 @@ spec:
           configMap:
             name: healthcheck-script
             defaultMode: 0777
+
