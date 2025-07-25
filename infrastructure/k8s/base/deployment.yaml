@@ -2,7 +2,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: curs-flask
-  namespace: default
   labels:
     app: curs-flask
     env: production
@@ -26,60 +25,60 @@ spec:
         prometheus.io/port: "5000"
         prometheus.io/path: "/metrics"
     spec:
-      # Pod-level hardening
-      securityContext:
-        runAsNonRoot: true
-        readOnlyRootFilesystem: true
-
       containers:
-      - name: curs-flask
-        image: trojanul2008/curs-flask:latest
-        imagePullPolicy: Always
+        - name: curs-flask
+          image: REPLACE_ME
+          imagePullPolicy: Always
 
-        # Container-level hardening
-        securityContext:
-          runAsNonRoot: true
-          readOnlyRootFilesystem: true
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
 
-        ports:
-        - containerPort: 5000
-        env:
-          - name: FLASK_ENV
-            value: "production"
-          - name: HISTORY_DAYS
-            value: "5"
-          - name: REQUEST_TIMEOUT
-            value: "10"
-          - name: RATE_LIMIT
-            value: "3/60"
-        resources:
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-          limits:
-            memory: "256Mi"
-            cpu: "500m"
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 5000
-          initialDelaySeconds: 15
-          periodSeconds: 20
-          timeoutSeconds: 5
-          failureThreshold: 3
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 5000
-          initialDelaySeconds: 5
-          periodSeconds: 10
-          timeoutSeconds: 3
-          failureThreshold: 1
-        volumeMounts:
-          - name: config-volume
-            mountPath: /app/curs_valutar/templates/healthcheck.sh
-            subPath: healthcheck.sh
-            readOnly: true
+          ports:
+            - containerPort: 5000
+
+          env:
+            - name: FLASK_ENV
+              value: "production"
+            - name: HISTORY_DAYS
+              value: "5"
+            - name: REQUEST_TIMEOUT
+              value: "10"
+            - name: RATE_LIMIT
+              value: "3/60"
+
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 1
+
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/curs_valutar/templates/healthcheck.sh
+              subPath: healthcheck.sh
+              readOnly: true
+
       volumes:
         - name: config-volume
           configMap:
