@@ -4,12 +4,15 @@ metadata:
   name: curs-flask-ingress
   namespace: default
   annotations:
-    # Specifica ca foloseste Traefik ca IngressClass
     kubernetes.io/ingress.class: traefik
+    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
-  ingressClassName: traefik
+  tls:
+    - hosts:
+        - exchange.istartit.com
+      secretName: curs-flask-tls
   rules:
-    - host: exchange.istartit.com    # Schimba cu DNS-ul sau IP-ul tau
+    - host: exchange.istartit.com
       http:
         paths:
           - path: /
@@ -19,9 +22,3 @@ spec:
                 name: curs-flask
                 port:
                   number: 80
-  # Dacă vrei TLS (opţional), poţi adăuga ceva de genul:
-  # tls:
-  #   - hosts:
-  #       - flask.local
-  #     secretName: flask-tls-secret
-

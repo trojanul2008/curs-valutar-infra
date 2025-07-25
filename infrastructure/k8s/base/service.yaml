@@ -3,8 +3,12 @@ kind: Service
 metadata:
   name: curs-flask
   namespace: default
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "5000"
+    prometheus.io/path: "/metrics"
 spec:
-  type: ClusterIP   # Important! Nu folosi LoadBalancer
+  type: ClusterIP
   selector:
     app: curs-flask
   ports:

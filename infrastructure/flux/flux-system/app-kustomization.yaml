@@ -1,11 +1,11 @@
-apiVersion: kustomize.toolkit.fluxcd.io/v1
+apiVersion: kustomize.toolkit.fluxcd.io/v1beta2
 kind: Kustomization
 metadata:
   name: curs-valutar
   namespace: flux-system
 spec:
   interval: 5m
-  path: "./infrastructure/k8s"
+  path: "./infrastructure/k8s/base"
   prune: true
   sourceRef:
     kind: GitRepository
@@ -14,4 +14,5 @@ spec:
     - apiVersion: apps/v1
       kind: Deployment
       name: curs-flask
-      namespace: default  # Ensure this is 'default'
+      namespace: default
+  timeout: 2m
