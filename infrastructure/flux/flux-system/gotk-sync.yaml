@@ -7,7 +7,7 @@ spec:
   interval: 1m0s
   url:      ssh://git@github.com/trojanul2008/curs-valutar.git
   ref:
-    branch: main
+    branch: prod
   secretRef:
     name: flux-system
 
