@@ -7,4 +7,4 @@ resources:
 configMapGenerator:
   - name: healthcheck-script
     files:
-      - scripts/healthcheck.sh
+      - healthcheck.sh
