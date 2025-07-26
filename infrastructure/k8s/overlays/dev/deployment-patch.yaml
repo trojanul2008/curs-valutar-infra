@@ -5,6 +5,10 @@ metadata:
 spec:
   template:
     spec:
+      # Add this section
+      imagePullSecrets:
+      - name: dockerhub-secret
+
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
