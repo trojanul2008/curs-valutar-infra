@@ -23,7 +23,7 @@ spec:
         - name: FLASK_ENV
           value: "development"
         - name: FLASK_APP
-          value: "curs_valutar.app"
+          value: "curs_valutar.app:create_app"
         - name: PYTHONPATH
           value: "/app"
         resources:
