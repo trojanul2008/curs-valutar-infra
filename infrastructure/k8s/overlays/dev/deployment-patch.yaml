@@ -23,9 +23,10 @@ spec:
         - name: FLASK_ENV
           value: "development"
         - name: FLASK_APP
-          value: "curs_valutar.app"     # <— adaugă asta
+          value: "curs_valutar.app"
+        - name: PYTHONPATH  # Adăugat pentru a găsi modulele Python
+          value: "/app"
         resources:
           requests:
             memory: "64Mi"
             cpu: "50m"
-
