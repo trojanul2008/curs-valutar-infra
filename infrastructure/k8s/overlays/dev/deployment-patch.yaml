@@ -24,7 +24,7 @@ spec:
           value: "development"
         - name: FLASK_APP
           value: "curs_valutar.app"
-        - name: PYTHONPATH  # Adăugat pentru a găsi modulele Python
+        - name: PYTHONPATH
           value: "/app"
         resources:
           requests:
