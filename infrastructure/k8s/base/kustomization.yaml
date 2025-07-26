@@ -4,7 +4,3 @@ resources:
   - deployment.yaml
   - service.yaml
   - ingress.yaml
-configMapGenerator:
-  - name: healthcheck-script
-    files:
-      - scripts/healthcheck.sh
