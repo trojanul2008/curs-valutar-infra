@@ -1,18 +1,15 @@
+# infrastructure/k8s/overlays/dev/ingress-patch.yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: curs-flask-ingress
-  namespace: default
   annotations:
     kubernetes.io/ingress.class: traefik
-    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
-  tls:
-    - hosts:
-        - exchange.istartit.com
-      secretName: curs-flask-tls
+  ingressClassName: traefik     # asigură-te că Traefik e folosit
+  tls: []                       # golim orice secțiune tls moștenită
   rules:
-    - host: exchange.istartit.com
+    - host: di-exchange.istartit.com
       http:
         paths:
           - path: /

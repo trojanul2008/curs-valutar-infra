@@ -2,15 +2,9 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: curs-flask-ingress
-  namespace: default
-  annotations:
-    kubernetes.io/ingress.class: traefik
-    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
-  tls:
-    - hosts:
-        - exchange.istartit.com
-      secretName: curs-flask-tls
+  ingressClassName: traefik  # forţează clasa Traefik
+
   rules:
     - host: exchange.istartit.com
       http:
