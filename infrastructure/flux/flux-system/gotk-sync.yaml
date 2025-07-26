@@ -9,4 +9,4 @@ spec:
     branch: main
   secretRef:
     name: flux-system
-  url: ssh://git@github.com/username/curs-valutar.git
+  url: ssh://git@github.com/trojanul2008/curs-valutar.git
