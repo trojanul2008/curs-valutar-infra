@@ -6,20 +6,28 @@ spec:
   replicas: 2
   template:
     spec:
+      imagePullSecrets:
+        - name: dockerhub-secret
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
         runAsGroup: 3000
         fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
 
       containers:
       - name: curs-flask
+        imagePullPolicy: IfNotPresent
         image: trojanul2008/curs-flask:prod-latest
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
           runAsNonRoot: true
           runAsUser: 1000
+          capabilities:
+            drop:
+              - ALL
         env:
         - name: FLASK_ENV
           value: "production"
@@ -27,4 +35,3 @@ spec:
           limits:
             memory: "256Mi"
             cpu: "500m"
-
