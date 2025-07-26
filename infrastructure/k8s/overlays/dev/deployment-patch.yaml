@@ -23,7 +23,7 @@ spec:
         - name: FLASK_ENV
           value: "development"
         - name: FLASK_APP
-          value: "curs_valutar.app:create_app"
+          value: "curs_valutar:create_app"  # Fixed to match Dockerfile
         - name: PYTHONPATH
           value: "/app"
         resources:
