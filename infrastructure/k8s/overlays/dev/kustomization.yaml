@@ -7,6 +7,5 @@ resources:
   - pdb.yaml
 
 patches:
-  - path: deployment-patch.yaml   # <— adaugă ăsta
+  - path: deployment-patch.yaml
   - path: ingress-patch.yaml
-

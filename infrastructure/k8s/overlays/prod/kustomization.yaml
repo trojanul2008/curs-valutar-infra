@@ -4,7 +4,7 @@ namespace: prod
 
 resources:
   - ../../base
-  - pdb.yaml 
+  - pdb.yaml
 
 patches:
   - path: ingress-patch.yaml

@@ -19,7 +19,6 @@ spec:
           type: RuntimeDefault
       containers:
       - name: curs-flask
-        # Use specific tag instead of 'latest'
         image: trojanul2008/curs-flask:dev
         imagePullPolicy: Always
         securityContext:

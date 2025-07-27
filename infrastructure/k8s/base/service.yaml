@@ -2,7 +2,6 @@ apiVersion: v1
 kind: Service
 metadata:
   name: curs-flask
-  namespace: default
   annotations:
     prometheus.io/scrape: "true"
     prometheus.io/port: "5000"
