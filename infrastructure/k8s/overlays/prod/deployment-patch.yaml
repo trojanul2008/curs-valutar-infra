@@ -3,6 +3,9 @@ kind: Deployment
 metadata:
   name: curs-flask
 spec:
+  selector:
+    matchLabels:
+      app: curs-flask
   replicas: 2
   template:
     spec:
@@ -19,7 +22,7 @@ spec:
       - name: curs-flask
         # Use specific tag instead of 'latest'
         image: trojanul2008/curs-flask:prod
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true

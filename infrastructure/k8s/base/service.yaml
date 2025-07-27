@@ -10,7 +10,7 @@ metadata:
 spec:
   type: ClusterIP
   selector:
-    app: curs-flask  # Fixed selector to match deployment
+    app: curs-flask
   ports:
     - protocol: TCP
       port: 80

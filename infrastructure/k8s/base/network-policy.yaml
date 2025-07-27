@@ -3,9 +3,12 @@ kind: NetworkPolicy
 metadata:
   name: allow-cross-namespace
 spec:
+  egress:
+  - {}
   podSelector: {}
   policyTypes:
   - Ingress
+  - Egress
   ingress:
   - from:
     - namespaceSelector: {}

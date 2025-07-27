@@ -4,6 +4,7 @@ namespace: dev
 
 resources:
   - ../../base
+  - pdb.yaml
 
 patches:
   - path: deployment-patch.yaml   # <— adaugă ăsta
