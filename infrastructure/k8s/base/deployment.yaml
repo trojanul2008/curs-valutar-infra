@@ -27,15 +27,13 @@ spec:
     spec:
       affinity:
         podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            podAffinityTerm:
-              labelSelector:
-                matchExpressions:
-                - key: app
-                  operator: In
-                  values: ["curs-flask"]
-              topologyKey: "kubernetes.io/hostname"
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values: ["curs-flask"]
+            topologyKey: "kubernetes.io/hostname"
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -92,7 +90,7 @@ spec:
 
           readinessProbe:
             httpGet:
-              path: /ready  # Changed to new endpoint
+              path: /ready
               port: 5000
             initialDelaySeconds: 5
             periodSeconds: 10
