@@ -20,7 +20,7 @@ spec:
           type: RuntimeDefault
       containers:
       - name: curs-flask
-        image: trojanul2008/curs-flask:prod
+        image: trojanul2008/curs-flask:prod-PLACEHOLDER
         imagePullPolicy: Always
         securityContext:
           allowPrivilegeEscalation: false
