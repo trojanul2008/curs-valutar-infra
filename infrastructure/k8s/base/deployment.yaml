@@ -25,9 +25,22 @@ spec:
         prometheus.io/port: "5000"
         prometheus.io/path: "/metrics"
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values: ["curs-flask"]
+              topologyKey: "kubernetes.io/hostname"
       securityContext:
         runAsNonRoot: true
-        runAsUser: 1000
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 2000
         seccompProfile:
           type: RuntimeDefault
       terminationGracePeriodSeconds: 30
@@ -39,7 +52,8 @@ spec:
 
           securityContext:
             runAsNonRoot: true
-            runAsUser: 1000
+            runAsUser: 10001
+            runAsGroup: 10001
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
@@ -61,9 +75,11 @@ spec:
             requests:
               memory: "128Mi"
               cpu: "100m"
+              ephemeral-storage: "100Mi"
             limits:
               memory: "256Mi"
               cpu: "500m"
+              ephemeral-storage: "200Mi"
 
           livenessProbe:
             httpGet:
@@ -76,7 +92,7 @@ spec:
 
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready  # Changed to new endpoint
               port: 5000
             initialDelaySeconds: 5
             periodSeconds: 10

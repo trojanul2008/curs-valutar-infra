@@ -10,28 +10,33 @@ spec:
         - name: dockerhub-secret
       securityContext:
         runAsNonRoot: true
-        runAsUser: 1000
-        runAsGroup: 3000
+        runAsUser: 10001
+        runAsGroup: 10001
         fsGroup: 2000
         seccompProfile:
           type: RuntimeDefault
-
       containers:
       - name: curs-flask
+        # Use specific tag instead of 'latest'
+        image: trojanul2008/curs-flask:prod
         imagePullPolicy: IfNotPresent
-        image: trojanul2008/curs-flask:prod-latest
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
           runAsNonRoot: true
-          runAsUser: 1000
+          runAsUser: 10001
+          runAsGroup: 10001
           capabilities:
-            drop:
-              - ALL
+            drop: ["ALL"]
         env:
         - name: FLASK_ENV
           value: "production"
         resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+            ephemeral-storage: "100Mi"
           limits:
             memory: "256Mi"
             cpu: "500m"
+            ephemeral-storage: "200Mi"

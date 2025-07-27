@@ -1,0 +1,9 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: curs-flask-pdb
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: curs-flask
