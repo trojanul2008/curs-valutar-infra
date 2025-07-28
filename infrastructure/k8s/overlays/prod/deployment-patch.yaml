@@ -20,7 +20,7 @@ spec:
           type: RuntimeDefault
       containers:
       - name: curs-flask
-        image: trojanul2008/curs-flask:prod-PLACEHOLDER
+        image: trojanul2008/curs-flask:prod-latest
         imagePullPolicy: Always
         securityContext:
           allowPrivilegeEscalation: false
@@ -33,6 +33,10 @@ spec:
         env:
         - name: FLASK_ENV
           value: "production"
+        - name: FLASK_APP
+          value: "curs_valutar:create_app"
+        - name: PYTHONPATH
+          value: "/app"
         resources:
           requests:
             memory: "128Mi"

@@ -7,7 +7,8 @@ spec:
   imageRepositoryRef:
     name: curs-flask-repo
   filterTags:
-    pattern: '^dev-.*$'
+    pattern: '^dev-.*'
+    extract: '$ts'
   policy:
     alphabetical:
       order: asc
