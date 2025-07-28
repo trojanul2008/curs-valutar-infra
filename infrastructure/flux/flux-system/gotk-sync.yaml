@@ -1,14 +1,16 @@
-apiVersion: source.toolkit.fluxcd.io/v1beta2
+apiVersion: source.toolkit.fluxcd.io/v1
 kind: GitRepository
 metadata:
   name: flux-system
   namespace: flux-system
 spec:
   interval: 1m0s
+  # Use the HTTPS URL (no “ssh://git@…” parsing issues)
   url: https://github.com/trojanul2008/curs-flask.git
   secretRef:
     name: flux-system
-  webhook:
-    # Configure GitHub webhook in repo settings pointing to Flux
-    endpoint: /flux-webhook
-    port: 9443
+  # move to the new "webhooks" field (array)
+  webhooks:
+    - type: github
+      endpoint: /flux-webhook
+      port: 9443

@@ -1,12 +1,17 @@
- resources:
-   - gotk-components.yaml
-   - gotk-sync.yaml
-   - app-kustomization.yaml
-
-   # Flux Image Automation
-   - image-repository.yaml
-   - image-policy.yaml
-   - image-update-automation.yaml
-   - image-policy-dev.yaml
-   - image-update-automation-dev.yaml
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: flux-system
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./infrastructure/flux/flux-system
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  # apply the components first
+  dependsOn:
+    - name: flux-system
+      kind: GitRepository
 
