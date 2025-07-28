@@ -4,8 +4,13 @@ namespace: dev
 
 resources:
   - ../../base
-    #  - pdb.yaml
 
 patches:
   - path: deployment-patch.yaml
   - path: ingress-patch.yaml
+
+images:
+  - name: trojanul2008/curs-flask
+    newName: trojanul2008/curs-flask
+    newTag: dev-PLACEHOLDER
+
