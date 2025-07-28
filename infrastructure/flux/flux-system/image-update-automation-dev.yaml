@@ -5,18 +5,18 @@ metadata:
   namespace: flux-system
 spec:
   interval: 5m
-  checkout:
-    gitRepositoryRef:
-      name: flux-system
-    branch: dev
-  commit:
-    author:
-      name: fluxcdbot
-      email: fluxcdbot@example.com
-    messageTemplate: >-
-      chore: update curs-flask dev image to
-      {{ range .Updates }} {{ .NewName }}:{{ .NewTag }}{{ end }}
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  git:
+    checkout:
+      ref:
+        branch: dev
+    commit:
+      author:
+        name: fluxcdbot
+        email: fluxcdbot@example.com
+      messageTemplate: "chore: update curs-flask dev image to {{ .UpdatedImage }}"
   update:
     path: infrastructure/k8s/overlays/dev
     strategy: Setters
-

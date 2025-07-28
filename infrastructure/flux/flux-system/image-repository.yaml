@@ -5,6 +5,6 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1m
-  url: https://index.docker.io/v1/
   image: trojanul2008/curs-flask
-
+  secretRef:
+    name: docker-credentials

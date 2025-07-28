@@ -1,13 +1,18 @@
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: flux-system
+  name: curs-valutar-dev
   namespace: flux-system
 spec:
   interval: 5m
-  path: ./infrastructure/flux/flux-system
+  path: ./infrastructure/k8s/overlays/dev
   prune: true
   sourceRef:
     kind: GitRepository
     name: flux-system
-  validation: client
+  targetNamespace: dev
+  wait: true
+  timeout: 3m
+  dependsOn:
+    - name: flux-system
+

@@ -1,4 +1,4 @@
-apiVersion: source.toolkit.fluxcd.io/v1
+apiVersion: source.toolkit.fluxcd.io/v1beta2
 kind: GitRepository
 metadata:
   name: flux-system
@@ -6,10 +6,7 @@ metadata:
 spec:
   interval: 1m0s
   url: https://github.com/trojanul2008/curs-flask.git
+  ref:
+    branch: dev
   secretRef:
     name: flux-system
-  webhooks:
-    - type: github
-      endpoint: /flux-webhook
-      port: 9443
-
