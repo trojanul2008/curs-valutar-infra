@@ -7,6 +7,5 @@ spec:
   imageRepositoryRef:
     name: curs-flask-repo
   policy:
-    semver:
-      range: ">=0.0.0"
-
+    alphabetical:
+      order: asc

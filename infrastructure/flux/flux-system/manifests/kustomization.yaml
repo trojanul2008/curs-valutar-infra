@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- gotk-sync.yaml
+- image-repository.yaml
+- image-policy-dev.yaml
+- image-policy.yaml
+- image-update-automation-dev.yaml
+- image-update-automation.yaml
+- app-kustomization.yaml
