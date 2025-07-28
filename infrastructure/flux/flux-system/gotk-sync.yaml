@@ -5,12 +5,11 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1m0s
-  # Use the HTTPS URL (no “ssh://git@…” parsing issues)
   url: https://github.com/trojanul2008/curs-flask.git
   secretRef:
     name: flux-system
-  # move to the new "webhooks" field (array)
   webhooks:
     - type: github
       endpoint: /flux-webhook
       port: 9443
+

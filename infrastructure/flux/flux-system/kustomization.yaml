@@ -10,8 +10,4 @@ spec:
   sourceRef:
     kind: GitRepository
     name: flux-system
-  # apply the components first
-  dependsOn:
-    - name: flux-system
-      kind: GitRepository
 
