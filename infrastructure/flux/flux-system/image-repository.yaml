@@ -1,0 +1,9 @@
+apiVersion: image.toolkit.fluxcd.io/v1beta1
+kind: ImageRepository
+metadata:
+  name: curs-flask-repo
+  namespace: flux-system
+spec:
+  interval: 1m
+  url: "https://index.docker.io/v1/"
+  image: trojanul2008/curs-flask

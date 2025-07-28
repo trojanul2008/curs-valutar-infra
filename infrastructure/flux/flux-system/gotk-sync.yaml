@@ -5,9 +5,10 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1m0s
-  url:      ssh://git@github.com:trojanul2008/curs-flask.git
-  ref:
-    branch: prod
+  url: ssh://git@github.com:trojanul2008/curs-flask.git
   secretRef:
     name: flux-system
-
+  webhook:
+    # Configure GitHub webhook in repo settings pointing to Flux
+    endpoint: /flux-webhook
+    port: 9443

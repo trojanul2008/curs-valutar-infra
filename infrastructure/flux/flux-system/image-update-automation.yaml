@@ -1,0 +1,19 @@
+apiVersion: image.toolkit.fluxcd.io/v1beta1
+kind: ImageUpdateAutomation
+metadata:
+  name: curs-flask-autoupdate
+  namespace: flux-system
+spec:
+  interval: 5m
+  checkout:
+    gitRepositoryRef:
+      name: flux-system
+    branch: prod
+  commit:
+    author:
+      name: fluxcdbot
+      email: fluxcdbot@example.com
+    messageTemplate: "chore: update curs-flask image to {{ range .Updates }}{{ .NewName }}:{{ .NewTag }}{{ end }}"
+  update:
+    path: infrastructure/k8s/overlays/prod
+    strategy: Setters

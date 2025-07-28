@@ -1,0 +1,11 @@
+apiVersion: image.toolkit.fluxcd.io/v1beta1
+kind: ImagePolicy
+metadata:
+  name: curs-flask-prod-policy
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: curs-flask-repo
+  policy:
+    semver:
+      range: ">=0.0.0"
