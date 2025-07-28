@@ -10,7 +10,7 @@ spec:
   template:
     spec:
       imagePullSecrets:
-      - name: dockerhub-secret
+      - name: docker-credentials
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001

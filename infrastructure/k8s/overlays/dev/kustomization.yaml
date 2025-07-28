@@ -13,5 +13,5 @@ patches:
 images:
   - name: trojanul2008/curs-flask
     newName: trojanul2008/curs-flask
-    newTag: dev-PLACEHOLDER
+    newTag: dev-latest
 
