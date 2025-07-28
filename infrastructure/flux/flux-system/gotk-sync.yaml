@@ -5,7 +5,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1m0s
-  url: git@github.com:trojanul2008/curs-flask.git
+  url: ssh://git@github.com:trojanul2008/curs-flask.git
   secretRef:
     name: flux-system
   webhook:
