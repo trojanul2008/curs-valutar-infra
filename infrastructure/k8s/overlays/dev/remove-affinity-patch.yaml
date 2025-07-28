@@ -1,0 +1,10 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: curs-flask
+spec:
+  template:
+    spec:
+      # Remove the affinity stanza entirely
+      affinity: null
+

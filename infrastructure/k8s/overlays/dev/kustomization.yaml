@@ -8,6 +8,7 @@ resources:
 patches:
   - path: deployment-patch.yaml
   - path: ingress-patch.yaml
+  - path: remove-affinity-patch.yaml
 
 images:
   - name: trojanul2008/curs-flask
