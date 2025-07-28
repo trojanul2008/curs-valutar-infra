@@ -45,7 +45,7 @@ spec:
 
       containers:
         - name: curs-flask
-          image: REPLACE_ME
+          image: trojanul2008/curs-flask:PLACEHOLDER
           imagePullPolicy: Always
 
           securityContext:
