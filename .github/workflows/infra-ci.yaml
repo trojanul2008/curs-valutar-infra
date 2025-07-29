@@ -1,4 +1,4 @@
-name: Infra Validation
+name: Infra Validation ${{ github.ref_name }}
 
 on:
   push:
@@ -12,9 +12,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Print branch info ${{ github.ref_name }}
-        run: echo "Running on branch... "
 
       - name: Install Kustomize
         run: |
