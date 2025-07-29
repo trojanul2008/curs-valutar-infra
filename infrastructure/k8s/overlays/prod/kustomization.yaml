@@ -14,5 +14,5 @@ images:
   - name: trojanul2008/curs-flask
     newName: trojanul2008/curs-flask
     # <-- This will be updated by Flux ImageUpdateAutomation to the exact semver, e.g. "v1.2.3"
-    newTag: v0.0.0
+    newTag: v1.2.3
 
