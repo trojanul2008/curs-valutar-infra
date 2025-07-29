@@ -11,8 +11,8 @@ patches:
   - path: remove-affinity-patch.yaml
 
 images:
-  - name: trojanul2008/curs-flask
-    newName: trojanul2008/curs-flask
+  - name: trojanul2008/curs-valutar
+    newName: trojanul2008/curs-valutar
     # <-- This will be updated by Flux ImageUpdateAutomation to the exact semver, e.g. "v1.2.3"
     newTag: v1.2.3
 

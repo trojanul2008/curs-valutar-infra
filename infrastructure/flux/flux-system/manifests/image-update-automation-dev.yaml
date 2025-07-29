@@ -1,7 +1,7 @@
 apiVersion: image.toolkit.fluxcd.io/v1beta2
 kind: ImageUpdateAutomation
 metadata:
-  name: curs-flask-dev-autoupdate
+  name: curs-valutar-dev-autoupdate
   namespace: flux-system
 spec:
   interval: 5m
@@ -16,7 +16,7 @@ spec:
       author:
         name: fluxcdbot
         email: fluxcdbot@example.com
-      messageTemplate: "chore: update curs-flask dev image to {{ .UpdatedImage }}"
+      messageTemplate: "chore: update curs-valutar-app dev image to {{ .UpdatedImage }}"
   update:
     path: infrastructure/k8s/overlays/dev
     strategy: Setters

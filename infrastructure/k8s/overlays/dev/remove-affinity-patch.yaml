@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: curs-flask
+  name: curs-valutar
 spec:
   template:
     spec:

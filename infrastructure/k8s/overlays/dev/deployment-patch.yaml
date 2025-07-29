@@ -1,12 +1,12 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: curs-flask
+  name: curs-valutar
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: curs-flask
+      app: curs-valutar
   template:
     spec:
       imagePullSecrets:
@@ -19,8 +19,8 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-      - name: curs-flask
-        image: trojanul2008/curs-flask:dev-latest
+      - name: curs-valutar
+        image: trojanul2008/curs-valutar-app:dev-latest
         imagePullPolicy: Always
         securityContext:
           allowPrivilegeEscalation: false

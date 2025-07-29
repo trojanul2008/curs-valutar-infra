@@ -1,10 +1,10 @@
 apiVersion: image.toolkit.fluxcd.io/v1beta2
 kind: ImageRepository
 metadata:
-  name: curs-flask-repo
+  name: curs-valutar-repo
   namespace: flux-system
 spec:
   interval: 1m
-  image: trojanul2008/curs-flask
+  image: trojanul2008/curs-valutar-app
   secretRef:
     name: docker-credentials

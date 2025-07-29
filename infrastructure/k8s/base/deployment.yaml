@@ -1,9 +1,9 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: curs-flask
+  name: curs-valutar
   labels:
-    app: curs-flask
+    app: curs-valutar
     env: production
     version: v1.0
 spec:
@@ -15,11 +15,11 @@ spec:
       maxUnavailable: 0
   selector:
     matchLabels:
-      app: curs-flask
+      app: curs-valutar
   template:
     metadata:
       labels:
-        app: curs-flask
+        app: curs-valutar
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "5000"
@@ -32,7 +32,7 @@ spec:
               matchExpressions:
               - key: app
                 operator: In
-                values: ["curs-flask"]
+                values: ["curs-valutar"]
             topologyKey: "kubernetes.io/hostname"
       securityContext:
         runAsNonRoot: true
@@ -44,8 +44,8 @@ spec:
       terminationGracePeriodSeconds: 30
 
       containers:
-        - name: curs-flask
-          image: trojanul2008/curs-flask:PLACEHOLDER
+        - name: curs-valutar
+          image: trojanul2008/curs-valutar-app:PLACEHOLDER
           imagePullPolicy: Always
 
           securityContext:

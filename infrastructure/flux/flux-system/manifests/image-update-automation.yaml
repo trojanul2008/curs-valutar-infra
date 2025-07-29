@@ -1,7 +1,7 @@
 apiVersion: image.toolkit.fluxcd.io/v1beta2
 kind: ImageUpdateAutomation
 metadata:
-  name: curs-flask-autoupdate
+  name: curs-valutar-autoupdate
   namespace: flux-system
 spec:
   interval: 5m
@@ -21,7 +21,7 @@ spec:
         name: fluxcdbot
         email: fluxcdbot@example.com
       # Use the exact updated image tag in commit message:
-      messageTemplate: "chore: promote curs-flask to {{ .UpdatedImage }}"
+      messageTemplate: "chore: promote curs-valutar-app to {{ .UpdatedImage }}"
 
   update:
     # Path to your prod Kustomize overlay:

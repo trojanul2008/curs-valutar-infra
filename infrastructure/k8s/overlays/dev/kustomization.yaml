@@ -11,7 +11,7 @@ patches:
   - path: remove-affinity-patch.yaml
 
 images:
-  - name: trojanul2008/curs-flask
-    newName: trojanul2008/curs-flask
+  - name: trojanul2008/curs-valutar-app
+    newName: trojanul2008/curs-valutar-app
     newTag: dev-latest
 

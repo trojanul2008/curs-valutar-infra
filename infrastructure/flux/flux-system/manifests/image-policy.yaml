@@ -1,12 +1,12 @@
 apiVersion: image.toolkit.fluxcd.io/v1beta2
 kind: ImagePolicy
 metadata:
-  name: curs-flask-prod-policy
+  name: curs-valutar-prod-policy
   namespace: flux-system
 spec:
   # Point at the shared ImageRepository
   imageRepositoryRef:
-    name: curs-flask-repo
+    name: curs-valutar-repo
 
   # Only pick tags matching a SemVer pattern (e.g. v1.2.3)
   filterTags:
