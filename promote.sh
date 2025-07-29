@@ -11,36 +11,40 @@ if ! git diff-index --quiet HEAD --; then
   exit 1
 fi
 
-# 1) Fetch dev + prod
-echo "⏳ Fetching ${REMOTE}/${DEV} and ${REMOTE}/${PROD} …"
-git fetch "${REMOTE}" "${DEV}:${DEV}" --force
-# try to fetch prod; ignore errors
-git fetch "${REMOTE}" "${PROD}:${PROD}" || true
+# 1) Fetch everything from origin
+echo "⏳ Fetching ${REMOTE}…"
+git fetch "${REMOTE}" --prune
 
-# 2) Make sure we're on dev
+# 2) Reset local dev to origin/dev
+echo "🔄 Resetting ${DEV} → ${REMOTE}/${DEV}"
 git checkout "${DEV}"
+git reset --hard "${REMOTE}/${DEV}"
 
-# 3) Detect if prod & dev share history
-if ! git merge-base --is‑ancestor "${DEV}" "${PROD}" 2>/dev/null; then
-  echo "✨ No common ancestor between ${DEV} and ${PROD}; first‑time push → creating ${PROD} from ${DEV}"
-  git branch -f "${PROD}" "${DEV}"
-  git checkout "${PROD}"
-  echo "⏳ Force‑pushing ${PROD} → ${REMOTE}/${PROD}"
-  git push "${REMOTE}" "${PROD}" --force --set-upstream
-  echo "✔️  Created ${PROD} from ${DEV}"
-  git checkout "${DEV}"
-  exit 0
+# 3) Check whether origin/prod exists
+if git show-ref --quiet "refs/remotes/${REMOTE}/${PROD}"; then
+  # origin/prod exists → check for shared history
+  if git merge-base --is‑ancestor "${REMOTE}/${DEV}" "${REMOTE}/${PROD}"; then
+    echo "🔀 Merging ${DEV} → ${PROD}"
+    git checkout "${PROD}"
+    git reset --hard "${REMOTE}/${PROD}"
+    git merge --no‑ff "${DEV}" -m "chore: promote ${DEV} → ${PROD}"
+    echo "⏳ Pushing merged ${PROD} → ${REMOTE}/${PROD}"
+    git push "${REMOTE}" "${PROD}"
+    git checkout "${DEV}"
+    echo "🎉 Promotion complete!"
+    exit 0
+  fi
+  echo "⚠️  origin/${PROD} and origin/${DEV} have no common ancestor → recreating ${PROD}"
+else
+  echo "✨ origin/${PROD} not found → creating first‑time branch ${PROD}"
 fi
 
-# 4) Normal merge path
-echo "🔀 Checking out ${PROD} and merging ${DEV} into it"
+# 4) First‑time or unrelated histories → force‑create prod at dev
+echo "🚀 Force‑creating ${PROD} from ${DEV}"
+git branch -f "${PROD}" "${DEV}"
 git checkout "${PROD}"
-git merge --no-ff "${DEV}" -m "chore: promote ${DEV} → ${PROD}"
-
-echo "⏳ Pushing ${PROD} → ${REMOTE}/${PROD}"
-git push "${REMOTE}" "${PROD}"
-
-# 5) Back to dev
+echo "⏳ Force‑pushing ${PROD} → ${REMOTE}/${PROD}"
+git push "${REMOTE}" "${PROD}" --force --set-upstream
 git checkout "${DEV}"
-echo "🎉 Promotion complete — you’re back on ${DEV}"
+echo "✔️  ${PROD} is now at the same tip as ${DEV}"
 
