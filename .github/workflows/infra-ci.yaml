@@ -1,4 +1,4 @@
-name: Infra Validation ${{ github.ref_name }}
+name: Infra Validation
 
 on:
   push:
@@ -8,10 +8,13 @@ on:
 
 jobs:
   k8s-lint:
-    name: Validate K8s Manifests
+    name: Validate Manifests on ${{ github.ref_name }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Print branch info
+        run: echo "✅ Running on branch: ${{ github.ref_name }}"
 
       - name: Install Kustomize
         run: |
@@ -33,3 +36,4 @@ jobs:
 
       - name: Validate prod overlay
         run: kustomize build infrastructure/k8s/overlays/prod | kubeconform -verbose
+
