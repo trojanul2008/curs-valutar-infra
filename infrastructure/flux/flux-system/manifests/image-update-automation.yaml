@@ -5,18 +5,26 @@ metadata:
   namespace: flux-system
 spec:
   interval: 5m
+
   sourceRef:
     kind: GitRepository
     name: flux-system
+
   git:
     checkout:
+      # Prod releases live on the 'main' (or 'prod') branch:
       ref:
         branch: prod
+
     commit:
       author:
         name: fluxcdbot
         email: fluxcdbot@example.com
-      messageTemplate: "chore: update curs-flask image to {{ .UpdatedImage }}"
+      # Use the exact updated image tag in commit message:
+      messageTemplate: "chore: promote curs-flask to {{ .UpdatedImage }}"
+
   update:
+    # Path to your prod Kustomize overlay:
     path: infrastructure/k8s/overlays/prod
     strategy: Setters
+

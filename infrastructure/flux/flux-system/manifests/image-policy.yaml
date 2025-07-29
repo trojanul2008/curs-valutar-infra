@@ -4,8 +4,17 @@ metadata:
   name: curs-flask-prod-policy
   namespace: flux-system
 spec:
+  # Point at the shared ImageRepository
   imageRepositoryRef:
     name: curs-flask-repo
+
+  # Only pick tags matching a SemVer pattern (e.g. v1.2.3)
+  filterTags:
+    pattern: '^v[0-9]+\.[0-9]+\.[0-9]+$'
+    extract: '$0'
+
+  # Choose the highest version according to semver (alphabetical works for vX.Y.Z)
   policy:
     alphabetical:
       order: asc
+
