@@ -1,5 +1,5 @@
 ---
-name: Infra Validation  # NU folosi variabile aici
+name: Infra Validation
 
 on:
   push:
@@ -9,14 +9,14 @@ on:
 
 jobs:
   k8s-lint:
-    name: Validate K8s Manifests on ${{ github.ref_name }}  # Aici e OK
+    name: Validate K8s Manifests on ${{ github.ref_name }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Print branch info
-        run: echo "✅ Running on branch: ${{ github.ref_name }}"
+        run: echo "Running on branch: ${{ github.ref_name }}"
 
       - name: Install Kustomize
         run: |
@@ -26,7 +26,8 @@ jobs:
       - name: Install kubeconform
         run: |
           KUBECONFORM_VERSION="0.6.4"
-          curl -L "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" -o kubeconform.tar.gz
+          curl -L "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            -o kubeconform.tar.gz
           tar xzf kubeconform.tar.gz
           chmod +x kubeconform
           sudo mv kubeconform /usr/local/bin/
