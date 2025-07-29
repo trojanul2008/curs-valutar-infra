@@ -1,27 +1,33 @@
- name: Infra Validation
- on: [push]
+name: Infra Validation (${{ github.ref_name }})
+on:
+  push:
+    branches:
+      - dev
+      - prod
 
- jobs:
-   k8s-lint:
-     runs-on: ubuntu-latest
-     steps:
-       - uses: actions/checkout@v4
+jobs:
+  k8s-lint:
+    name: Validate K8s Manifests on ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-       - name: Install Kustomize
-         run: |
-           curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
-           sudo mv kustomize /usr/local/bin/
+      - name: Install Kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
 
-       - name: Install kubeconform
-         run: |
-           KUBECONFORM_VERSION="0.6.4"
-           curl -L "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
-             | tar xz
-           chmod +x kubeconform
-           sudo mv kubeconform /usr/local/bin/
+      - name: Install kubeconform
+        run: |
+          KUBECONFORM_VERSION="0.6.4"
+          curl -L "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | tar xz
+          chmod +x kubeconform
+          sudo mv kubeconform /usr/local/bin/
 
-       - name: Validate manifests with kubeconform
-         run: |
-           kustomize build infrastructure/k8s/base     | kubeconform -verbose
-           kustomize build infrastructure/k8s/overlays/dev  | kubeconform -verbose
-           ustomize build infrastructure/k8s/overlays/prod | kubeconform -verbose
+      - name: Validate manifests with kubeconform
+        run: |
+          kustomize build infrastructure/k8s/base            | kubeconform -verbose
+          kustomize build infrastructure/k8s/overlays/dev    | kubeconform -verbose
+          kustomize build infrastructure/k8s/overlays/prod   | kubeconform -verbose
+
