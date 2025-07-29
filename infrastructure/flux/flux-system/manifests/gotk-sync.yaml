@@ -5,7 +5,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1m
-  url: https://github.com/trojanul2008/curs-flask.git
+  url: https://github.com/trojanul2008/curs-valutar-infra.git
   ref:
     branch: dev
   secretRef:

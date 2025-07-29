@@ -1,0 +1,18 @@
+name: Infra Validation
+on: [push]
+
+jobs:
+  k8s-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate manifests
+        run: |
+          # Install tools
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+          
+          # Validate
+          kustomize build infrastructure/k8s/base | kubeconform -verbose
+          kustomize build infrastructure/k8s/overlays/dev | kubeconform -verbose
+          kustomize build infrastructure/k8s/overlays/prod | kubeconform -verbose
