@@ -8,13 +8,14 @@ on:
 
 jobs:
   k8s-lint:
-    name: Validate Manifests on ${{ github.ref_name }}
+    name: Validate K8s Manifests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Print branch info
-        run: echo "✅ Running on branch: ${{ github.ref_name }}"
+        run: echo "Running on branch: ${{ github.ref_name }}"
 
       - name: Install Kustomize
         run: |
@@ -24,9 +25,11 @@ jobs:
       - name: Install kubeconform
         run: |
           KUBECONFORM_VERSION="0.6.4"
-          curl -L "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | tar xz
+          curl -L "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" -o kubeconform.tar.gz
+          tar xzf kubeconform.tar.gz
           chmod +x kubeconform
           sudo mv kubeconform /usr/local/bin/
+          rm kubeconform.tar.gz
 
       - name: Validate base manifests
         run: kustomize build infrastructure/k8s/base | kubeconform -verbose
@@ -36,4 +39,3 @@ jobs:
 
       - name: Validate prod overlay
         run: kustomize build infrastructure/k8s/overlays/prod | kubeconform -verbose
-
