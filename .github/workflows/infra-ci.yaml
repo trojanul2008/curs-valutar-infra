@@ -8,14 +8,11 @@ on:
 
 jobs:
   k8s-lint:
-    name: Validate K8s Manifests
+    name: Validate K8s Manifests on ${{ github.ref_name }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Print branch info
-        run: echo "Running on branch: ${{ github.ref_name }}"
 
       - name: Install Kustomize
         run: |
