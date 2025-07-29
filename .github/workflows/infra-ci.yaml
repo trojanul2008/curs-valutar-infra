@@ -13,8 +13,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Print branch info
-        run: echo "Running on branch: ${{ github.ref_name }}"
+      - name: Print branch info ${{ github.ref_name }}
+        run: echo "Running on branch... "
 
       - name: Install Kustomize
         run: |
