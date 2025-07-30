@@ -8,15 +8,15 @@ on:
 
 jobs:
   k8s-lint:
-    # job name can now interpolate matrix.branch
     name: Validate K8s Manifests on ${{ matrix.branch }}
     runs-on: ubuntu-latest
 
     strategy:
       matrix:
-        # define both branches here
+        # we’ll spin up a job for each branch…
         branch: [ dev, prod ]
-    # only run the matrix entry matching the branch that was pushed
+
+    # …but only execute the one matching the branch that was just pushed
     if: github.ref_name == matrix.branch
 
     steps:
@@ -24,7 +24,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Print branch info
-        run: echo "Running on branch: ${{ matrix.branch }}"
+        run: echo "✅ Running on branch: ${{ matrix.branch }}"
 
       - name: Install Kustomize
         run: |
@@ -34,16 +34,22 @@ jobs:
       - name: Install kubeconform
         run: |
           KUBECONFORM_VERSION="0.6.4"
-          curl -L "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | tar xz
+          curl -L "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            -o kubeconform.tar.gz
+          tar xzf kubeconform.tar.gz
           chmod +x kubeconform
           sudo mv kubeconform /usr/local/bin/
+          rm kubeconform.tar.gz
 
       - name: Validate base manifests
-        run: kustomize build infrastructure/k8s/base | kubeconform -verbose
+        run: |
+          kustomize build infrastructure/k8s/base | kubeconform -verbose
 
       - name: Validate dev overlay
-        run: kustomize build infrastructure/k8s/overlays/dev | kubeconform -verbose
+        run: |
+          kustomize build infrastructure/k8s/overlays/dev | kubeconform -verbose
 
       - name: Validate prod overlay
-        run: kustomize build infrastructure/k8s/overlays/prod | kubeconform -verbose
+        run: |
+          kustomize build infrastructure/k8s/overlays/prod | kubeconform -verbose
 
