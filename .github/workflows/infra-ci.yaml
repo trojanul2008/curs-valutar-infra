@@ -13,11 +13,11 @@ jobs:
 
     strategy:
       matrix:
-        # we’ll spin up a job for each branch…
+        # spin up jobs for both branches…
         branch: [ dev, prod ]
 
-    # …but only execute the one matching the branch that was just pushed
-    if: github.ref_name == matrix.branch
+    # only run the entry matching the pushed branch
+    if: ${{ github.ref_name == matrix.branch }}
 
     steps:
       - name: Checkout code
