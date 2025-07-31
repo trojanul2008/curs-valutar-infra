@@ -13,6 +13,7 @@ env:
   KUSTOMIZE_VERSION: v5.0.2
   KUBECONFORM_VERSION: 0.6.4
   KYVERNO_VERSION: v1.12.4
+  YQ_VERSION: v4.43.1
   CHAOS_MESH_VERSION: v2.6.1
 
 jobs:
@@ -102,11 +103,16 @@ jobs:
     name: Image Vulnerability Scan
     runs-on: ubuntu-latest
     needs: policy
-      #    if: github.ref != 'refs/heads/dev'
     steps:
       - uses: actions/checkout@v4
-      - name: Install Trivy
+      - name: Install Trivy and yq
         run: |
+          # Install yq for YAML parsing
+          sudo wget "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64" \
+            -O /usr/bin/yq
+          sudo chmod +x /usr/bin/yq
+
+          # Install Trivy
           sudo apt-get install -y wget apt-transport-https gnupg lsb-release
           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
             | sudo apt-key add -
@@ -116,23 +122,27 @@ jobs:
           sudo apt-get install -y trivy
       - name: Scan container images
         run: |
-          mkdir -p .github/scripts
-          cat <<'EOF' > .github/scripts/scan-images.sh
+          # Create scan script using yq
+          cat <<'EOF' > scan-images.sh
           #!/bin/bash
           set -euo pipefail
 
-          find infrastructure -name '*.yaml' -exec grep -E 'image: ' {} \; \
-            | awk '$2 != "" && $2 !~ /PLACEHOLDER/ {print $2}' \
-            | sort | uniq \
-            | while read -r image; do
-                echo "Scanning $image"
-                trivy image --cache-dir /tmp/trivy-cache \
-                  --exit-code 1 --severity HIGH,CRITICAL "$image"
+          # Extract images using yq
+          find infrastructure -name '*.yaml' -print0 | while IFS= read -r -d $'\0' file; do
+            yq eval '.. | select(has("image")) | .image' "$file" \
+              | grep -v "null" | grep -v "PLACEHOLDER" | while read -r image; do
+                if [ -n "$image" ]; then
+                  echo "Scanning $image"
+                  trivy image --cache-dir /tmp/trivy-cache \
+                    --exit-code 1 --severity HIGH,CRITICAL "$image"
+                fi
               done
+          done
           EOF
-          chmod +x .github/scripts/scan-images.sh
+
+          chmod +x scan-images.sh
           mkdir -p /tmp/trivy-cache
-          ./.github/scripts/scan-images.sh
+          ./scan-images.sh
 
   drift:
     name: Drift Detection
