@@ -98,6 +98,7 @@ jobs:
             echo "✅ All Kyverno policies passed"
           fi
 
+
   scan:
     name: Image Vulnerability Scan
     runs-on: ubuntu-latest
@@ -121,36 +122,84 @@ jobs:
           sudo apt-get install -y trivy
       - name: Scan container images
         run: |
-          # Create improved scan script
+          # Create debug-friendly scan script
           cat <<'EOF' > scan-images.sh
           #!/bin/bash
           set -euo pipefail
-
-          # Extract images using yq with proper filtering
-          find infrastructure \( -name '*.yaml' -o -name '*.yml' \) -print0 | \
+          # Initialize counters
+          total_files=0
+          files_with_images=0
+          files_without_images=0
+          invalid_yaml_files=0
+          # Create report file
+          report_file="image-scan-report.txt"
+          echo "Image Scan Report - $(date)" > "$report_file"
+          # Process all YAML files
           while IFS= read -r -d $'\0' file; do
-            # Process only valid YAML files
-            if yq eval 'document_index' "$file" >/dev/null 2>&1; then
-              # Extract images with proper error handling
-              images=$(yq eval \
-                '.. | select(has("image")) | .image | \
+            ((total_files++))
+            file_entry="\n===== File: $file =====\n"
+            # Skip non-YAML files
+            if [[ ! "$file" =~ \.(yaml|yml)$ ]]; then
+              file_entry+="Skipped: Not a YAML file\n"
+              echo -e "$file_entry" >> "$report_file"
+              continue
+            fi
+            # Check if valid YAML
+            if ! yq eval 'document_index' "$file" >/dev/null 2>&1; then
+              ((invalid_yaml_files++))
+              file_entry+="Skipped: Invalid YAML format\n"
+              echo -e "$file_entry" >> "$report_file"
+              continue
+            fi
+            # Extract images
+            images=$(
+              yq eval \
+                '.. | select(has("image")) | .image |
                 select(. != null and . != "PLACEHOLDER")' \
-                "$file" 2>/dev/null)
-
-              # Process each image
+                "$file" 2>/dev/null || true
+            )
+            # Process images if found
+            if [ -n "$images" ]; then
+              ((files_with_images++))
+              file_entry+="Found images:\n"
               while IFS= read -r image; do
                 if [ -n "$image" ]; then
-                  echo "Scanning $image from $file"
-                  trivy image --cache-dir /tmp/trivy-cache \
-                    --exit-code 1 --severity HIGH,CRITICAL "$image"
+                  file_entry+="- $image\n"
+                fi
+              done <<< "$images"
+              echo -e "$file_entry" >> "$report_file"
+              # Scan each image
+              while IFS= read -r image; do
+                if [ -n "$image" ]; then
+                  echo "Scanning $image"
+                  if ! trivy image --cache-dir /tmp/trivy-cache \
+                    --exit-code 1 --severity HIGH,CRITICAL "$image"; then
+                    echo "❌ Critical vulnerabilities found in $image"
+                  fi
                 fi
               done <<< "$images"
             else
-              echo "Skipping invalid YAML file: $file"
+              ((files_without_images++))
+              file_entry+="No valid images found in this file\n"
+              echo -e "$file_entry" >> "$report_file"
             fi
-          done
+          done < <(find infrastructure -type f \( -name '*.yaml' -o -name '*.yml' \) -print0)
+          # Generate summary
+          summary="\n=== Scan Summary ===
+          Total files processed: $total_files
+          Files with images: $files_with_images
+          Files without valid images: $files_without_images
+          Invalid YAML files: $invalid_yaml_files
+          "
+          echo -e "$summary" >> "$report_file"
+          # Print report
+          echo -e "\n📊 Scan Report:"
+          cat "$report_file"
+          # Fail if any files without images
+          if [ "$files_without_images" -gt 0 ]; then
+            echo "❌ Found $files_without_images files without valid images"
+          fi
           EOF
-
           chmod +x scan-images.sh
           mkdir -p /tmp/trivy-cache
           ./scan-images.sh
