@@ -10,7 +10,7 @@ spec:
   template:
     spec:
       imagePullSecrets:
-      - name: docker-credentials
+        - name: docker-credentials
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -19,28 +19,29 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-      - name: curs-valutar
-        image: trojanul2008/curs-valutar-app:dev-latest
-        imagePullPolicy: Always
-        securityContext:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          runAsNonRoot: true
-          runAsUser: 10001
-          runAsGroup: 10001
-        env:
-        - name: FLASK_ENV
-          value: "development"
-        - name: FLASK_APP
-          value: "curs_valutar:create_app"
-        - name: PYTHONPATH
-          value: "/app"
-        resources:
-          requests:
-            memory: "64Mi"
-            cpu: "50m"
-            ephemeral-storage: "100Mi"
-          limits:
-            memory: "128Mi"
-            cpu: "200m"
-            ephemeral-storage: "200Mi"
+        - name: curs-valutar
+          image: trojanul2008/curs-valutar-app:dev-latest
+          imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+          env:
+            - name: FLASK_ENV
+              value: "development"
+            - name: FLASK_APP
+              value: "curs_valutar:create_app"
+            - name: PYTHONPATH
+              value: "/app"
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+              ephemeral-storage: "100Mi"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+              ephemeral-storage: "200Mi"
+

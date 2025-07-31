@@ -19,30 +19,31 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-      - name: curs-valutar
-        image: trojanul2008/curs-valutar-app:prod-latest
-        imagePullPolicy: Always
-        securityContext:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          runAsNonRoot: true
-          runAsUser: 10001
-          runAsGroup: 10001
-          capabilities:
-            drop: ["ALL"]
-        env:
-        - name: FLASK_ENV
-          value: "production"
-        - name: FLASK_APP
-          value: "curs_valutar:create_app"
-        - name: PYTHONPATH
-          value: "/app"
-        resources:
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-            ephemeral-storage: "100Mi"
-          limits:
-            memory: "256Mi"
-            cpu: "500m"
-            ephemeral-storage: "200Mi"
+        - name: curs-valutar
+          image: trojanul2008/curs-valutar-app:prod-latest
+          imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: FLASK_ENV
+              value: "production"
+            - name: FLASK_APP
+              value: "curs_valutar:create_app"
+            - name: PYTHONPATH
+              value: "/app"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+              ephemeral-storage: "100Mi"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+              ephemeral-storage: "200Mi"
+
