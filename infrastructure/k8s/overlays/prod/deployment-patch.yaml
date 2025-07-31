@@ -20,7 +20,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: curs-valutar
-          image: trojanul2008/curs-valutar-app:prod-latest
+          image: trojanul2008/curs-valutar-app:v1.2.5
           imagePullPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false

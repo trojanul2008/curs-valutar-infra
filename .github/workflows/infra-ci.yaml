@@ -130,8 +130,13 @@ jobs:
     needs: policy
     steps:
       - uses: actions/checkout@v4
+
       - name: Install tools
         run: |
+          # Install dependencies
+          sudo apt-get update
+          sudo apt-get install -y jq
+
           # Install yq
           echo "Installing yq $YQ_VERSION"
           sudo wget "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64" \
@@ -139,17 +144,10 @@ jobs:
           sudo chmod +x /usr/bin/yq
           yq --version
 
-          # Install Trivy and jq
-          echo "Installing Trivy and jq"
-          sudo apt-get update
-          sudo apt-get install -y wget apt-transport-https gnupg lsb-release jq
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
-            | sudo apt-key add -
-          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" \
-            | sudo tee /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
-          sudo apt-get install -y trivy
-          trivy --version
+          # Install Trivy
+          echo "Installing Trivy"
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | \
+            sudo sh -s -- -b /usr/local/bin v0.65.0
 
       - name: Pre-cache vulnerability database
         run: |
@@ -161,6 +159,7 @@ jobs:
           chmod +x .github/scripts/scan-images.sh
           mkdir -p "$TRIVY_CACHE_DIR"
           TRIVY_CACHE_DIR="$TRIVY_CACHE_DIR" .github/scripts/scan-images.sh
+
       - name: Upload scan reports
         if: always()
         uses: actions/upload-artifact@v4
