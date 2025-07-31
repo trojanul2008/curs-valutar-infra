@@ -14,7 +14,6 @@ env:
   KUBECONFORM_VERSION: 0.6.4
   KYVERNO_VERSION: v1.12.4
   YQ_VERSION: v4.43.1
-  CHAOS_MESH_VERSION: v2.6.1
 
 jobs:
   lint:
@@ -122,21 +121,33 @@ jobs:
           sudo apt-get install -y trivy
       - name: Scan container images
         run: |
-          # Create scan script using yq
+          # Create improved scan script
           cat <<'EOF' > scan-images.sh
           #!/bin/bash
           set -euo pipefail
 
-          # Extract images using yq
-          find infrastructure -name '*.yaml' -print0 | while IFS= read -r -d $'\0' file; do
-            yq eval '.. | select(has("image")) | .image' "$file" \
-              | grep -v "null" | grep -v "PLACEHOLDER" | while read -r image; do
+          # Extract images using yq with proper filtering
+          find infrastructure \( -name '*.yaml' -o -name '*.yml' \) -print0 | \
+          while IFS= read -r -d $'\0' file; do
+            # Process only valid YAML files
+            if yq eval 'document_index' "$file" >/dev/null 2>&1; then
+              # Extract images with proper error handling
+              images=$(yq eval \
+                '.. | select(has("image")) | .image | \
+                select(. != null and . != "PLACEHOLDER")' \
+                "$file" 2>/dev/null)
+
+              # Process each image
+              while IFS= read -r image; do
                 if [ -n "$image" ]; then
-                  echo "Scanning $image"
+                  echo "Scanning $image from $file"
                   trivy image --cache-dir /tmp/trivy-cache \
                     --exit-code 1 --severity HIGH,CRITICAL "$image"
                 fi
-              done
+              done <<< "$images"
+            else
+              echo "Skipping invalid YAML file: $file"
+            fi
           done
           EOF
 
