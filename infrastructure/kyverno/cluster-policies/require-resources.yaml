@@ -8,7 +8,7 @@ spec:
     - name: check-resources
       match:
         resources:
-          kinds: ["Deployment","StatefulSet","DaemonSet"]
+          kinds: ["Deployment", "StatefulSet", "DaemonSet"]
       validate:
         message: "Each container must specify both requests and limits for cpu and memory."
         pattern:

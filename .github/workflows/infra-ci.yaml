@@ -40,8 +40,9 @@ jobs:
 
       - name: Install Kyverno CLI
         run: |
-          curl -sSfL https://github.com/kyverno/kyverno/releases/download/v1.12.4/kyverno-cli_1.12.4_linux_x86_64.tar.gz | \
-            tar xz -C /usr/local/bin kyverno
+           curl -sSfL \
+            https://github.com/kyverno/kyverno/releases/download/v1.12.4/kyverno-cli_1.12.4_linux_x86_64.tar.gz \
+            | tar xz -C /usr/local/bin kyverno
       - name: Test Kyverno policies
         run: |
           kyverno apply infrastructure/kyverno/ -r infrastructure/k8s/base --resource-type Deployment
