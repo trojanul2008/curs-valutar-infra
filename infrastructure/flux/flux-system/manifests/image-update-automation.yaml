@@ -20,4 +20,3 @@ spec:
   update:
     path: infrastructure/k8s/overlays/prod
     strategy: Setters
-

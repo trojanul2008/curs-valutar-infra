@@ -6,4 +6,3 @@ spec:
   template:
     spec:
       affinity: null
-

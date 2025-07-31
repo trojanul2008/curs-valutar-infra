@@ -9,4 +9,3 @@ rules:
     max: 2
   truthy: disable
   document-start: disable
-
