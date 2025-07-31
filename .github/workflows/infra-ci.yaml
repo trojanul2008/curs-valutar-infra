@@ -28,6 +28,14 @@ jobs:
           sudo mv kubeconform /usr/local/bin/
           rm kubeconform.tar.gz
 
+      - name: Install yamllint
+        run: |
+          pip3 install yamllint
+
+      - name: Lint YAML files
+        run: |
+          find infrastructure -name '*.yaml' -o -name '*.yml' | xargs yamllint -c .yamllint.yml
+
       - name: Validate base manifests
         run: kustomize build infrastructure/k8s/base | kubeconform -verbose
 
