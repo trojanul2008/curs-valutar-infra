@@ -22,6 +22,7 @@ vulnerable_images=0
 # Create report file
 report_file="image-scan-report.txt"
 echo "Image Scan Report - $(date)" > "$report_file"
+echo "Vulnerable Images:" > "vulnerability-details.txt"
 
 # Process all YAML files
 while IFS= read -r -d $'\0' file; do
@@ -72,11 +73,25 @@ while IFS= read -r -d $'\0' file; do
       if [ -n "$image" ]; then
         echo "Scanning $image"
         ((scanned_images++))
-        if ! trivy image --cache-dir "$TRIVY_CACHE_DIR" \
-            --exit-code 1 --severity HIGH,CRITICAL "$image"; then
+        
+        # Scan and capture output
+        scan_output=$(trivy image --cache-dir "$TRIVY_CACHE_DIR" \
+          --severity HIGH,CRITICAL -f json "$image" 2>&1 || true)
+        
+        # Check for vulnerabilities
+        if echo "$scan_output" | jq -e '.Results[].Vulnerabilities != null' >/dev/null; then
           echo "❌ Critical vulnerabilities found in $image"
+          echo "$scan_output" | jq . > "trivy-scan-$(echo $image | tr /: _).json"
+          
+          # Add to vulnerability report
+          echo "Image: $image" >> "vulnerability-details.txt"
+          echo "$scan_output" | jq -r '.Results[].Vulnerabilities[] | "  - \(.VulnerabilityID): \(.Title) (Severity: \(.Severity))"' >> "vulnerability-details.txt"
+          echo "" >> "vulnerability-details.txt"
+          
           scan_failed=1
           ((vulnerable_images++))
+        else
+          echo "✅ No critical vulnerabilities found in $image"
         fi
       fi
     done <<< "$images"
@@ -100,6 +115,10 @@ Images with vulnerabilities: $vulnerable_images
 "
 echo -e "$summary" >> "$report_file"
 
+# Append vulnerability details to report
+echo -e "\nVulnerability Details:" >> "$report_file"
+cat "vulnerability-details.txt" >> "$report_file"
+
 # Print report
 echo -e "\n📊 Scan Report:"
 cat "$report_file"
@@ -116,9 +135,15 @@ if [ "$invalid_yaml_files" -gt 0 ]; then
   grep -B1 "Invalid YAML format" "$report_file" | grep "File:"
 fi
 
+# Upload reports as artifacts
+echo "report_file=${report_file}" >> $GITHUB_ENV
+echo "vulnerability_details=vulnerability-details.txt" >> $GITHUB_ENV
+
 # Exit with error if any scan failed
 if [ "$scan_failed" -eq 1 ]; then
   echo "❌ Critical vulnerabilities found in $vulnerable_images image(s)"
+  echo "Vulnerability details:"
+  cat "vulnerability-details.txt"
   exit 1
 fi
 

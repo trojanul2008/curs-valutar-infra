@@ -142,7 +142,7 @@ jobs:
           # Install Trivy
           echo "Installing Trivy"
           sudo apt-get update
-          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+          sudo apt-get install -y wget apt-transport-https gnupg lsb-release jq
           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
             | sudo apt-key add -
           echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" \
@@ -161,6 +161,15 @@ jobs:
           chmod +x .github/scripts/scan-images.sh
           mkdir -p "$TRIVY_CACHE_DIR"
           TRIVY_CACHE_DIR="$TRIVY_CACHE_DIR" .github/scripts/scan-images.sh
+      - name: Upload scan reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-reports
+          path: |
+            image-scan-report.txt
+            vulnerability-details.txt
+            trivy-scan-*.json
 
   drift:
     name: Drift Detection
