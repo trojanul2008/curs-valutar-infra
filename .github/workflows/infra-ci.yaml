@@ -139,8 +139,8 @@ jobs:
           sudo chmod +x /usr/bin/yq
           yq --version
 
-          # Install Trivy
-          echo "Installing Trivy"
+          # Install Trivy and jq
+          echo "Installing Trivy and jq"
           sudo apt-get update
           sudo apt-get install -y wget apt-transport-https gnupg lsb-release jq
           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
@@ -163,7 +163,7 @@ jobs:
           TRIVY_CACHE_DIR="$TRIVY_CACHE_DIR" .github/scripts/scan-images.sh
       - name: Upload scan reports
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: security-reports
           path: |
