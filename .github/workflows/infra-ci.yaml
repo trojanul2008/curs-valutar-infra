@@ -16,7 +16,6 @@ env:
   CHAOS_MESH_VERSION: v2.6.1
 
 jobs:
-
   lint:
     name: YAML Lint
     runs-on: ubuntu-latest
@@ -43,27 +42,22 @@ jobs:
     needs: lint
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Kustomize
-        uses: peaceiris/actions-kustomize@v3
+        uses: imranismail/setup-kustomize@v2
         with:
           version: ${{ env.KUSTOMIZE_VERSION }}
-
-      - name: Setup kubeconform
-        uses: instrumenta/kubeconform-action@v1
+      - name: Setup Kubeconform
+        uses: bmuschko/setup-kubeconform@v1
         with:
           version: ${{ env.KUBECONFORM_VERSION }}
-
       - name: Validate base
         run: |
           kustomize build infrastructure/k8s/base \
             | kubeconform -verbose
-
       - name: Validate dev overlay
         run: |
           kustomize build infrastructure/k8s/overlays/dev \
             | kubeconform -verbose
-
       - name: Validate prod overlay
         run: |
           kustomize build infrastructure/k8s/overlays/prod \
@@ -75,19 +69,16 @@ jobs:
     needs: schema
     steps:
       - uses: actions/checkout@v4
-
       - name: Use Kyverno Action
         uses: kyverno/kyverno-action@v1
         with:
           version: ${{ env.KYVERNO_VERSION }}
-
       - name: Test Kyverno policies
         run: |
           kustomize build infrastructure/k8s/base > base-manifests.yaml
           kyverno apply infrastructure/kyverno/ \
             --resource base-manifests.yaml \
             --output json > kyverno-results.json || true
-
           if jq -e '.failed | length > 0' kyverno-results.json; then
             echo "❌ Kyverno policy violations detected:"
             jq -r '
@@ -106,14 +97,12 @@ jobs:
     if: github.ref != 'refs/heads/dev'
     steps:
       - uses: actions/checkout@v4
-
       - name: Trivy Action
         uses: aquasecurity/trivy-action@master
         with:
           format: 'table'
           exit-code: '1'
           severity: 'HIGH,CRITICAL'
-
       - name: Run Scanner
         run: ./.github/scripts/scan-images.sh
 
@@ -123,10 +112,9 @@ jobs:
     needs: scan
     steps:
       - uses: actions/checkout@v4
-
       - name: Install Flux CLI
-        uses: fluxcanary/install-flux@v0.2.0
-
+        run: |
+          curl -s https://fluxcd.io/install.sh | sudo bash -s -- --version=${{ env.CHAOS_MESH_VERSION }}
       - name: Check for configuration drift
         run: |
           flux diff kustomization curs-valutar-dev \
