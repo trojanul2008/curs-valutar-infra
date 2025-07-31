@@ -124,6 +124,7 @@ jobs:
             echo "✅ All Kyverno policies passed"
           fi
 
+
   scan:
     name: Image Vulnerability Scan
     runs-on: ubuntu-latest
@@ -161,7 +162,6 @@ jobs:
           cat <<'EOF' > scan-images.sh
           #!/bin/bash
           set -euo pipefail
-
           # Enhanced debug info
           echo "### SCAN DEBUG INFO ###"
           echo "Trivy version: $(trivy --version | head -1)"
@@ -169,7 +169,6 @@ jobs:
           echo "Cache dir: $TRIVY_CACHE_DIR"
           echo "Files to process: $(find infrastructure -type f \( -name '*.yaml' -o -name '*.yml' \) | wc -l)"
           echo "########################"
-
           # Initialize counters
           total_files=0
           files_with_images=0
@@ -179,39 +178,35 @@ jobs:
           total_images=0
           scanned_images=0
           vulnerable_images=0
-
           # Create report file
           report_file="image-scan-report.txt"
           echo "Image Scan Report - $(date)" > "$report_file"
-
           # Process all YAML files
           while IFS= read -r -d $'\0' file; do
             ((total_files++))
             file_entry="\n===== File: $file =====\n"
-
             # Skip non-YAML files
             if [[ ! "$file" =~ \.(yaml|yml)$ ]]; then
               file_entry+="Skipped: Not a YAML file\n"
               echo -e "$file_entry" >> "$report_file"
               continue
             fi
-
-            # Check if valid YAML
-            if ! yq eval 'true' "$file" >/dev/null 2>&1; then
+            # Check if valid YAML - capture errors
+            yq_error=""
+            if ! yq_output=$(yq eval 'true' "$file" 2>&1); then
               ((invalid_yaml_files++))
               file_entry+="Skipped: Invalid YAML format\n"
+              file_entry+="YQ Error: $yq_output\n"
               echo -e "$file_entry" >> "$report_file"
-              echo "⚠️ Invalid YAML: $file" >&2
+              echo "⚠️ Invalid YAML: $file - $yq_output" >&2
               continue
             fi
-
             # Extract images (ignore PLACEHOLDER and Kyverno patterns)
             images=$(
               yq eval '.. | select(has("image")) | .image |
               select(. != null and . != "PLACEHOLDER" and (. | test("^!") | not))' \
               "$file" 2>/dev/null || true
             )
-
             # Process images if found
             if [ -n "$images" ]; then
               ((files_with_images++))
@@ -223,7 +218,6 @@ jobs:
                 fi
               done <<< "$images"
               echo -e "$file_entry" >> "$report_file"
-
               # Scan each image
               while IFS= read -r image; do
                 if [ -n "$image" ]; then
@@ -244,7 +238,6 @@ jobs:
               echo "ℹ️ File without images: $file" >&2
             fi
           done < <(find infrastructure -type f \( -name '*.yaml' -o -name '*.yml' \) -print0)
-
           # Generate summary
           summary="\n=== Scan Summary ===
           Total files processed: $total_files
@@ -256,17 +249,19 @@ jobs:
           Images with vulnerabilities: $vulnerable_images
           "
           echo -e "$summary" >> "$report_file"
-
           # Print report
           echo -e "\n📊 Scan Report:"
           cat "$report_file"
-
           # Print files without images to console
           if [ "$files_without_images" -gt 0 ]; then
             echo -e "\nℹ️ Files without valid images:"
             grep -B1 "No valid images found" "$report_file" | grep "File:"
           fi
-
+          # Print invalid YAML files to console
+          if [ "$invalid_yaml_files" -gt 0 ]; then
+            echo -e "\n⚠️ Invalid YAML files:"
+            grep -B1 "Invalid YAML format" "$report_file" | grep "File:"
+          fi
           # Exit with error if any scan failed
           if [ "$scan_failed" -eq 1 ]; then
             echo "❌ Critical vulnerabilities found in $vulnerable_images image(s)"
@@ -274,7 +269,6 @@ jobs:
           fi
           echo "✅ Scan completed successfully"
           EOF
-
           chmod +x scan-images.sh
           mkdir -p $TRIVY_CACHE_DIR
           ./scan-images.sh
