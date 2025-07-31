@@ -19,6 +19,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
       - name: Install Kustomize
         run: |
           curl -s \
@@ -54,7 +59,18 @@ jobs:
       - name: Test Kyverno policies
         run: |
           kustomize build infrastructure/k8s/base > base-manifests.yaml
-          kyverno apply infrastructure/kyverno/ --resource base-manifests.yaml
+          kyverno apply infrastructure/kyverno/ \
+            --resource base-manifests.yaml \
+            --output json > kyverno-results.json || true
+
+          # Check if any failures exist
+          if jq -e '.failed | length > 0' kyverno-results.json; then
+            echo "❌ Kyverno policy violations detected:"
+            jq -r '.failed[] | "RESOURCE: \(.resource.kind)/\(.resource.name) | POLICY: \(.policy) | RULE: \(.rule)"' kyverno-results.json
+            exit 1
+          else
+            echo "✅ All Kyverno policies passed"
+          fi
 
       - name: Install Trivy
         run: |

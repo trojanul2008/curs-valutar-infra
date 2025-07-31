@@ -1,0 +1,155 @@
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    prometheus.io/path: /metrics
+    prometheus.io/port: "5000"
+    prometheus.io/scrape: "true"
+  name: curs-valutar
+spec:
+  ports:
+  - port: 80
+    protocol: TCP
+    targetPort: 5000
+  selector:
+    app: curs-valutar
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: curs-valutar
+    env: production
+    version: v1.0
+  name: curs-valutar
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: curs-valutar
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        prometheus.io/path: /metrics
+        prometheus.io/port: "5000"
+        prometheus.io/scrape: "true"
+      labels:
+        app: curs-valutar
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - curs-valutar
+            topologyKey: kubernetes.io/hostname
+      containers:
+      - env:
+        - name: FLASK_ENV
+          value: production
+        - name: HISTORY_DAYS
+          value: "5"
+        - name: REQUEST_TIMEOUT
+          value: "10"
+        - name: RATE_LIMIT
+          value: 3/60
+        image: trojanul2008/curs-valutar-app:PLACEHOLDER
+        imagePullPolicy: Always
+        name: curs-valutar
+        ports:
+        - containerPort: 5000
+        resources:
+          limits:
+            cpu: 500m
+            ephemeral-storage: 200Mi
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            ephemeral-storage: 100Mi
+            memory: 128Mi
+        securityContext:
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsGroup: 10001
+          runAsNonRoot: true
+          runAsUser: 10001
+      livenessProbe:
+        failureThreshold: 3
+        httpGet:
+          path: /health
+          port: 5000
+        initialDelaySeconds: 15
+        periodSeconds: 20
+        timeoutSeconds: 5
+      readinessProbe:
+        failureThreshold: 1
+        httpGet:
+          path: /ready
+          port: 5000
+        initialDelaySeconds: 5
+        periodSeconds: 10
+        timeoutSeconds: 3
+      securityContext:
+        allowPrivilegeEscalation: false
+        fsGroup: 2000
+        runAsGroup: 10001
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: curs-valutar-pdb
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: curs-valutar
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    kubernetes.io/ingress.class: traefik
+  name: curs-valutar-ingress
+spec:
+  rules:
+  - host: exchange.istartit.com
+    http:
+      paths:
+      - backend:
+          service:
+            name: curs-valutar
+            port:
+              number: 80
+        path: /
+        pathType: Prefix
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cross-namespace
+spec:
+  egress:
+  - {}
+  ingress:
+  - from:
+    - namespaceSelector: {}
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress

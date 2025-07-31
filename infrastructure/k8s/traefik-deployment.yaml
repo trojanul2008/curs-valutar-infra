@@ -13,19 +13,28 @@ spec:
       labels:
         app: traefik
     spec:
-      # Pod‑wide security context
       securityContext:
         runAsNonRoot: true
-        runAsUser: 65532      # nobody
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: traefik
-          image: traefik:latest    # adjust to your desired tag
-          # Container‑level hardening
+          image: traefik:2.10.7
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             runAsNonRoot: true
-            runAsUser: 65532        # nobody
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
           ports:
             - containerPort: 80
             - containerPort: 443
