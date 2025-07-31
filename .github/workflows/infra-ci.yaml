@@ -9,100 +9,50 @@ on:
     branches:
       - dev
 
+env:
+  KUSTOMIZE_VERSION: v5.0.2
+  KUBECONFORM_VERSION: v0.6.4
+  KYVERNO_VERSION: v1.12.4
+  CHAOS_MESH_VERSION: v2.6.1
+
 jobs:
-  k8s-lint:
-    name: Validate K8s Manifests
+
+  lint:
+    name: YAML Lint
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+      - name: Cache pip
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+      - name: Install yamllint
+        run: pip install yamllint
+      - name: Lint YAML
         run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
-
-      - name: Install Kustomize
-        run: |
-          curl -s \
-            https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh \
-            | bash
-          sudo mv kustomize /usr/local/bin/
-
-      - name: Install kubeconform
-        run: |
-          KUBECONFORM_VERSION="0.6.4"
-          KUBECONFORM_URL="https://github.com/yannh/kubeconform/releases/download"
-          KUBECONFORM_URL+="/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
-          curl -L "$KUBECONFORM_URL" -o kubeconform.tar.gz
-          tar xzf kubeconform.tar.gz
-          chmod +x kubeconform
-          sudo mv kubeconform /usr/local/bin/
-          rm kubeconform.tar.gz
-
-      - name: Lint YAML files
-        run: |
-          pip3 install yamllint
           find infrastructure -name '*.yaml' -o -name '*.yml' \
             | xargs yamllint -c .yamllint.yml
 
-      - name: Install Kyverno CLI
-        run: |
-          KYVERNO_VERSION="v1.12.4"
-          KYVERNO_URL="https://github.com/kyverno/kyverno/releases/download/"
-          KYVERNO_URL+="${KYVERNO_VERSION}/kyverno-cli_${KYVERNO_VERSION}"
-          KYVERNO_URL+="_linux_x86_64.tar.gz"
-          curl -sSfL "$KYVERNO_URL" | tar xz -C /usr/local/bin kyverno
+  schema:
+    name: Schema Validation
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Test Kyverno policies
-        run: |
-          kustomize build infrastructure/k8s/base > base-manifests.yaml
-          kyverno apply infrastructure/kyverno/ \
-            --resource base-manifests.yaml \
-            --output json > kyverno-results.json || true
+      - name: Setup Kustomize
+        uses: peaceiris/actions-kustomize@v3
+        with:
+          version: ${{ env.KUSTOMIZE_VERSION }}
 
-          # Check if any failures exist
-          if jq -e '.failed | length > 0' kyverno-results.json; then
-            echo "❌ Kyverno policy violations detected:"
-            jq -r '.failed[] | "RESOURCE: \(.resource.kind)/\(.resource.name) | POLICY: \(.policy) | RULE: \(.rule)"' kyverno-results.json
-            exit 1
-          else
-            echo "✅ All Kyverno policies passed"
-          fi
+      - name: Setup kubeconform
+        uses: instrumenta/kubeconform-action@v1
+        with:
+          version: ${{ env.KUBECONFORM_VERSION }}
 
-      - name: Install Trivy
-        run: |
-          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
-            | sudo apt-key add -
-          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" \
-            | sudo tee -a /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
-          sudo apt-get install -y trivy
-
-      - name: Scan container images
-        run: |
-          # Create scan helper script
-          cat <<EOF > scan-images.sh
-          #!/bin/bash
-          set -euo pipefail
-          find infrastructure -name '*.yaml' -exec grep -E 'image: ' {} \; \
-            | awk '{print \$2}' | sort | uniq \
-            | while read -r image; do
-                echo "Scanning \$image"
-                trivy image --exit-code 1 --severity HIGH,CRITICAL "\$image"
-              done
-          EOF
-          chmod +x scan-images.sh
-          ./scan-images.sh
-
-      - name: Install Chaos Mesh CRDs
-        run: |
-          kubectl apply -f https://mirrors.chaos-mesh.org/v2.6.1/crd.yaml
-
-      - name: Validate base manifests
+      - name: Validate base
         run: |
           kustomize build infrastructure/k8s/base \
             | kubeconform -verbose
@@ -117,20 +67,69 @@ jobs:
           kustomize build infrastructure/k8s/overlays/prod \
             | kubeconform -verbose
 
-      - name: Install Flux CLI
+  policy:
+    name: Kyverno Policies
+    runs-on: ubuntu-latest
+    needs: schema
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Kyverno Action
+        uses: kyverno/kyverno-action@v1
+        with:
+          version: ${{ env.KYVERNO_VERSION }}
+
+      - name: Test Kyverno policies
         run: |
-          curl -s https://fluxcd.io/install.sh | sudo bash
+          kustomize build infrastructure/k8s/base > base-manifests.yaml
+          kyverno apply infrastructure/kyverno/ \
+            --resource base-manifests.yaml \
+            --output json > kyverno-results.json || true
+
+          if jq -e '.failed | length > 0' kyverno-results.json; then
+            echo "❌ Kyverno policy violations detected:"
+            jq -r '
+              .failed[] |
+              "RESOURCE: \(.resource.kind)/\(.resource.name) | POLICY: \(.policy) | RULE: \(.rule)"
+            ' kyverno-results.json
+            exit 1
+          else
+            echo "✅ All Kyverno policies passed"
+          fi
+
+  scan:
+    name: Image Vulnerability Scan
+    runs-on: ubuntu-latest
+    needs: policy
+    if: github.ref != 'refs/heads/dev'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trivy Action
+        uses: aquasecurity/trivy-action@master
+        with:
+          format: 'table'
+          exit-code: '1'
+          severity: 'HIGH,CRITICAL'
+
+      - name: Run Scanner
+        run: ./.github/scripts/scan-images.sh
+
+  drift:
+    name: Drift Detection
+    runs-on: ubuntu-latest
+    needs: scan
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Flux CLI
+        uses: fluxcanary/install-flux@v0.2.0
 
       - name: Check for configuration drift
         run: |
-          # Generate manifests for comparison
-          kustomize build infrastructure/k8s/overlays/dev > dev-manifests.yaml
-          kustomize build infrastructure/k8s/overlays/prod > prod-manifests.yaml
-
-          # Compare with cluster state
           flux diff kustomization curs-valutar-dev \
             --path infrastructure/k8s/overlays/dev \
-            || echo "No drift detected in dev"
+            || echo "No drift in dev"
           flux diff kustomization curs-valutar-prod \
             --path infrastructure/k8s/overlays/prod \
-            || echo "No drift detected in prod"
+            || echo "No drift in prod"
