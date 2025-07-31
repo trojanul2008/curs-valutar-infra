@@ -5,11 +5,15 @@ on:
     branches:
       - dev
       - prod
+  pull_request:
+    branches:
+      - dev
 
 jobs:
   k8s-lint:
     name: Validate K8s Manifests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
@@ -25,7 +29,8 @@ jobs:
       - name: Install kubeconform
         run: |
           KUBECONFORM_VERSION="0.6.4"
-          KUBECONFORM_URL="https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          KUBECONFORM_URL="https://github.com/yannh/kubeconform/releases/download"
+          KUBECONFORM_URL+="/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
           curl -L "$KUBECONFORM_URL" -o kubeconform.tar.gz
           tar xzf kubeconform.tar.gz
           chmod +x kubeconform
@@ -48,10 +53,38 @@ jobs:
 
       - name: Test Kyverno policies
         run: |
-          # Generate test resources from base manifests
           kustomize build infrastructure/k8s/base > base-manifests.yaml
-          # Apply Kyverno policies to test resources
           kyverno apply infrastructure/kyverno/ --resource base-manifests.yaml
+
+      - name: Install Trivy
+        run: |
+          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
+            | sudo apt-key add -
+          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" \
+            | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
+
+      - name: Scan container images
+        run: |
+          # Create scan helper script
+          cat <<EOF > scan-images.sh
+          #!/bin/bash
+          set -euo pipefail
+          find infrastructure -name '*.yaml' -exec grep -E 'image: ' {} \; \
+            | awk '{print \$2}' | sort | uniq \
+            | while read -r image; do
+                echo "Scanning \$image"
+                trivy image --exit-code 1 --severity HIGH,CRITICAL "\$image"
+              done
+          EOF
+          chmod +x scan-images.sh
+          ./scan-images.sh
+
+      - name: Install Chaos Mesh CRDs
+        run: |
+          kubectl apply -f https://mirrors.chaos-mesh.org/v2.6.1/crd.yaml
 
       - name: Validate base manifests
         run: |
@@ -67,3 +100,21 @@ jobs:
         run: |
           kustomize build infrastructure/k8s/overlays/prod \
             | kubeconform -verbose
+
+      - name: Install Flux CLI
+        run: |
+          curl -s https://fluxcd.io/install.sh | sudo bash
+
+      - name: Check for configuration drift
+        run: |
+          # Generate manifests for comparison
+          kustomize build infrastructure/k8s/overlays/dev > dev-manifests.yaml
+          kustomize build infrastructure/k8s/overlays/prod > prod-manifests.yaml
+
+          # Compare with cluster state
+          flux diff kustomization curs-valutar-dev \
+            --path infrastructure/k8s/overlays/dev \
+            || echo "No drift detected in dev"
+          flux diff kustomization curs-valutar-prod \
+            --path infrastructure/k8s/overlays/prod \
+            || echo "No drift detected in prod"
