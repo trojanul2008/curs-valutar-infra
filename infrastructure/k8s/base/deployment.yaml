@@ -28,12 +28,12 @@ spec:
       affinity:
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
-          - labelSelector:
-              matchExpressions:
-              - key: app
-                operator: In
-                values: ["curs-valutar"]
-            topologyKey: "kubernetes.io/hostname"
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values: ["curs-valutar"]
+              topologyKey: "kubernetes.io/hostname"
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -42,12 +42,10 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       terminationGracePeriodSeconds: 30
-
       containers:
         - name: curs-valutar
           image: trojanul2008/curs-valutar-app:PLACEHOLDER
           imagePullPolicy: Always
-
           securityContext:
             runAsNonRoot: true
             runAsUser: 10001
@@ -55,10 +53,8 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
-
           ports:
             - containerPort: 5000
-
           env:
             - name: FLASK_ENV
               value: "production"
@@ -68,7 +64,6 @@ spec:
               value: "10"
             - name: RATE_LIMIT
               value: "3/60"
-
           resources:
             requests:
               memory: "128Mi"
@@ -78,21 +73,20 @@ spec:
               memory: "256Mi"
               cpu: "500m"
               ephemeral-storage: "200Mi"
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 5000
+        initialDelaySeconds: 15
+        periodSeconds: 20
+        timeoutSeconds: 5
+        failureThreshold: 3
+      readinessProbe:
+        httpGet:
+          path: /ready
+          port: 5000
+        initialDelaySeconds: 5
+        periodSeconds: 10
+        timeoutSeconds: 3
+        failureThreshold: 1
 
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 5000
-            initialDelaySeconds: 15
-            periodSeconds: 20
-            timeoutSeconds: 5
-            failureThreshold: 3
-
-          readinessProbe:
-            httpGet:
-              path: /ready
-              port: 5000
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 3
-            failureThreshold: 1
