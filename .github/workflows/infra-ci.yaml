@@ -40,9 +40,12 @@ jobs:
 
       - name: Install Kyverno CLI
         run: |
-           curl -sSfL \
-            https://github.com/kyverno/kyverno/releases/download/v1.12.4/kyverno-cli_1.12.4_linux_x86_64.tar.gz \
-            | tar xz -C /usr/local/bin kyverno
+          KYVERNO_VERSION="v1.12.4"
+          KYVERNO_URL="https://github.com/kyverno/kyverno/releases/download/"
+          KYVERNO_URL+="${KYVERNO_VERSION}/kyverno-cli_${KYVERNO_VERSION}"
+          KYVERNO_URL+="_linux_x86_64.tar.gz"
+          curl -sSfL "$KYVERNO_URL" | tar xz -C /usr/local/bin kyverno
+
       - name: Test Kyverno policies
         run: |
           kyverno apply infrastructure/kyverno/ -r infrastructure/k8s/base --resource-type Deployment
