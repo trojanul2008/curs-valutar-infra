@@ -1,5 +1,3 @@
-cd ~/cicd/curs-valutar-infra
-cat << 'EOF' > .github/workflows/infra-ci.yaml
 name: Infra Validation
 
 on:
@@ -41,12 +39,3 @@ jobs:
 
       - name: Validate prod overlay
         run: kustomize build infrastructure/k8s/overlays/prod | kubeconform -verbose
-EOF
-
-# Validate the YAML
-yamllint .github/workflows/infra-ci.yaml
-
-# Commit and push
-git add .github/workflows/infra-ci.yaml
-git commit -m "fix: simplify CI workflow to resolve syntax errors"
-git push origin dev
