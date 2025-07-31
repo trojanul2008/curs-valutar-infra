@@ -48,7 +48,10 @@ jobs:
 
       - name: Test Kyverno policies
         run: |
-          kyverno apply infrastructure/kyverno/ -r infrastructure/k8s/base --resource-type Deployment
+          # Generate test resources from base manifests
+          kustomize build infrastructure/k8s/base > base-manifests.yaml
+          # Apply Kyverno policies to test resources
+          kyverno apply infrastructure/kyverno/ --resource base-manifests.yaml
 
       - name: Validate base manifests
         run: |
