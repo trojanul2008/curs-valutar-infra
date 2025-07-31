@@ -98,7 +98,6 @@ jobs:
             echo "✅ All Kyverno policies passed"
           fi
 
-
   scan:
     name: Image Vulnerability Scan
     runs-on: ubuntu-latest
@@ -131,6 +130,7 @@ jobs:
           files_with_images=0
           files_without_images=0
           invalid_yaml_files=0
+          scan_failed=0
           # Create report file
           report_file="image-scan-report.txt"
           echo "Image Scan Report - $(date)" > "$report_file"
@@ -175,6 +175,7 @@ jobs:
                   if ! trivy image --cache-dir /tmp/trivy-cache \
                     --exit-code 1 --severity HIGH,CRITICAL "$image"; then
                     echo "❌ Critical vulnerabilities found in $image"
+                    scan_failed=1
                   fi
                 fi
               done <<< "$images"
@@ -182,6 +183,7 @@ jobs:
               ((files_without_images++))
               file_entry+="No valid images found in this file\n"
               echo -e "$file_entry" >> "$report_file"
+              echo "ℹ️ File without images: $file" >&2
             fi
           done < <(find infrastructure -type f \( -name '*.yaml' -o -name '*.yml' \) -print0)
           # Generate summary
@@ -195,10 +197,17 @@ jobs:
           # Print report
           echo -e "\n📊 Scan Report:"
           cat "$report_file"
-          # Fail if any files without images
+          # Print files without images to console
           if [ "$files_without_images" -gt 0 ]; then
-            echo "❌ Found $files_without_images files without valid images"
+            echo -e "\nℹ️ Files without valid images:"
+            grep -B1 "No valid images found" "$report_file" | grep "File:"
           fi
+          # Exit with error if any scan failed
+          if [ "$scan_failed" -eq 1 ]; then
+            echo "❌ Critical vulnerabilities found in some images"
+            exit 1
+          fi
+          echo "✅ Scan completed successfully"
           EOF
           chmod +x scan-images.sh
           mkdir -p /tmp/trivy-cache
