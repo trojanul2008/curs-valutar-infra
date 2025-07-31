@@ -1,3 +1,5 @@
+cd ~/cicd/curs-valutar-infra
+cat << 'EOF' > .github/workflows/infra-ci.yaml
 name: Infra Validation
 
 on:
@@ -8,23 +10,14 @@ on:
 
 jobs:
   k8s-lint:
-    name: Validate K8s Manifests on ${{ matrix.branch }}
+    name: Validate K8s Manifests
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        # spin up jobs for both branches…
-        branch: [ dev, prod ]
-
-    # only run the entry matching the pushed branch
-    if: ${{ github.ref_name == matrix.branch }}
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Print branch info
-        run: echo "✅ Running on branch: ${{ matrix.branch }}"
+        run: echo "Running on branch: ${{ github.ref_name }}"
 
       - name: Install Kustomize
         run: |
@@ -34,22 +27,26 @@ jobs:
       - name: Install kubeconform
         run: |
           KUBECONFORM_VERSION="0.6.4"
-          curl -L "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
-            -o kubeconform.tar.gz
+          curl -L "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" -o kubeconform.tar.gz
           tar xzf kubeconform.tar.gz
           chmod +x kubeconform
           sudo mv kubeconform /usr/local/bin/
           rm kubeconform.tar.gz
 
       - name: Validate base manifests
-        run: |
-          kustomize build infrastructure/k8s/base | kubeconform -verbose
+        run: kustomize build infrastructure/k8s/base | kubeconform -verbose
 
       - name: Validate dev overlay
-        run: |
-          kustomize build infrastructure/k8s/overlays/dev | kubeconform -verbose
+        run: kustomize build infrastructure/k8s/overlays/dev | kubeconform -verbose
 
       - name: Validate prod overlay
-        run: |
-          kustomize build infrastructure/k8s/overlays/prod | kubeconform -verbose
+        run: kustomize build infrastructure/k8s/overlays/prod | kubeconform -verbose
+EOF
 
+# Validate the YAML
+yamllint .github/workflows/infra-ci.yaml
+
+# Commit and push
+git add .github/workflows/infra-ci.yaml
+git commit -m "fix: simplify CI workflow to resolve syntax errors"
+git push origin dev
