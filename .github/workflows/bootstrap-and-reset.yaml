@@ -13,61 +13,55 @@ jobs:
     name: Reset Cluster & Flux Bootstrap
     runs-on: ubuntu-latest
     steps:
+      # 1) Checkout code
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Restore mTLS certs
+      # 2) Restore kubeconfig (points at https://api.istartit.com:443)
+      - name: Restore kubeconfig
         run: |
           mkdir -p ~/.kube
-          echo "${{ secrets.CLIENT_CRT }}" | base64 --decode > ~/.kube/client.crt
-          echo "${{ secrets.CLIENT_KEY }}" | base64 --decode > ~/.kube/client.key
-          chmod 600 ~/.kube/client.key
-
-      - name: Restore kubeconfig and inject certs
-        run: |
-          # Decode the base kubeconfig
           echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 --decode > ~/.kube/config
+          chmod 600 ~/.kube/config
 
-          # Extract the first cluster and user names
-          CLUSTER=$(kubectl config view -o jsonpath='{.clusters[0].name}')
-          USER=$(kubectl config view -o jsonpath='{.users[0].name}')
-
-          # Skip TLS verify on server cert
-          kubectl config set clusters.${CLUSTER}.insecure-skip-tls-verify true
-
-          # Attach our client cert + key
-          kubectl config set users.${USER}.client-certificate ~/.kube/client.crt
-          kubectl config set users.${USER}.client-key ~/.kube/client.key
-
-          # Sanity check
+      # 3) Verify we can reach the API
+      - name: Verify cluster access
+        run: |
           kubectl config view
           kubectl config current-context
           kubectl get nodes
 
+      # 4) Install kubectl
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
         with:
           version: 'latest'
 
+      # 5) Install Flux CLI
       - name: Install Flux CLI
         run: curl -s https://fluxcd.io/install.sh | sudo bash
 
+      # 6) Install Helm CLI
       - name: Install Helm CLI
         run: curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
+      # 7) Make wipe script executable
       - name: Make wipe script executable
         run: chmod +x ./wipe-cluster.sh
 
+      # 8) Wipe cluster back to zero
       - name: Wipe cluster back to zero
         env:
           TARGET_CONTEXT: default
         run: ./wipe-cluster.sh
 
+      # 9) Install Kyverno
       - name: Install Kyverno
         run: |
           kubectl create ns kyverno || true
           kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/main/config/release/install.yaml
 
+      # 10) Bootstrap Flux
       - name: Flux bootstrap to GitHub
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
