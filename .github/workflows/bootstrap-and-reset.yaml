@@ -22,7 +22,6 @@ jobs:
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 --decode > ~/.kube/config
-          chmod 600 ~/.kube/config
 
       # 3) Verify we can reach the API
       - name: Verify cluster access
