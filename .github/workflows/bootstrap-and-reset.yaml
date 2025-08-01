@@ -26,18 +26,21 @@ jobs:
           echo "${{ secrets.CLIENT_KEY }}" | base64 --decode > ~/.kube/client.key
           chmod 600 ~/.kube/client.key
 
-      # 3) Restore the base kubeconfig and inject paths to our certs
+      # 3) Restore kubeconfig and inject cert paths dynamically
       - name: Restore kubeconfig and inject certs
         run: |
-          # Decode the API-server kubeconfig (contains server URL, but no client certs)
           echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 --decode > ~/.kube/config
 
+          # Discover the first cluster and user names
+          CLUSTER=$(kubectl config view -o jsonpath='{.clusters[0].name}')
+          USER=$(kubectl config view -o jsonpath='{.users[0].name}')
+
           # Point the cluster entry at our CA bundle
-          kubectl config set clusters.default.cluster-certificate-authority ~/.kube/ca.crt
+          kubectl config set clusters.${CLUSTER}.cluster-certificate-authority ~/.kube/ca.crt
 
           # Point the user entry at our client cert + key
-          kubectl config set users.default.user-client-certificate ~/.kube/client.crt
-          kubectl config set users.default.user-client-key ~/.kube/client.key
+          kubectl config set users.${USER}.user-client-certificate ~/.kube/client.crt
+          kubectl config set users.${USER}.user-client-key ~/.kube/client.key
 
           # Verify we can talk to the API
           kubectl config view
