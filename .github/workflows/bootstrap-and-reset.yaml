@@ -1,4 +1,3 @@
-# .github/workflows/bootstrap-and-reset.yaml
 name: 🚀 Reset & Bootstrap Infra
 
 on:
@@ -14,48 +13,68 @@ jobs:
     name: Reset Cluster & Flux Bootstrap
     runs-on: ubuntu-latest
     steps:
+      # 1) Checkout your repo (includes wipe-cluster.sh)
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Restore kubeconfig
+      # 2) Decode and install your mTLS certs
+      - name: Restore mTLS certs
         run: |
           mkdir -p ~/.kube
+          echo "${{ secrets.CA_CRT }}"    | base64 --decode > ~/.kube/ca.crt
+          echo "${{ secrets.CLIENT_CRT }}" | base64 --decode > ~/.kube/client.crt
+          echo "${{ secrets.CLIENT_KEY }}" | base64 --decode > ~/.kube/client.key
+          chmod 600 ~/.kube/client.key
+
+      # 3) Restore the base kubeconfig and inject paths to our certs
+      - name: Restore kubeconfig and inject certs
+        run: |
+          # Decode the API-server kubeconfig (contains server URL, but no client certs)
           echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 --decode > ~/.kube/config
 
-      - name: Debug kubeconfig
-        run: |
+          # Point the cluster entry at our CA bundle
+          kubectl config set clusters.default.cluster-certificate-authority ~/.kube/ca.crt
+
+          # Point the user entry at our client cert + key
+          kubectl config set users.default.user-client-certificate ~/.kube/client.crt
+          kubectl config set users.default.user-client-key ~/.kube/client.key
+
+          # Verify we can talk to the API
           kubectl config view
           kubectl config current-context
           kubectl get nodes
 
+      # 4) Install kubectl CLI
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
         with:
           version: 'latest'
 
-      # <-- New: install flux CLI before wiping
+      # 5) Install Flux CLI
       - name: Install Flux CLI
-        run: |
-          curl -s https://fluxcd.io/install.sh | sudo bash
+        run: curl -s https://fluxcd.io/install.sh | sudo bash
 
-      # <-- New: install Helm CLI for uninstalling External-Secrets
+      # 6) Install Helm CLI
       - name: Install Helm CLI
-        run: |
-          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+        run: curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-      - name: Make wipe-cluster.sh executable
+      # 7) Make wipe script executable
+      - name: Make wipe script executable
         run: chmod +x ./wipe-cluster.sh
 
+      # 8) Wipe everything back to zero
       - name: Wipe cluster back to zero
         env:
           TARGET_CONTEXT: default
         run: ./wipe-cluster.sh
 
+      # 9) Install Kyverno CRDs & controller
       - name: Install Kyverno
         run: |
           kubectl create ns kyverno || true
           kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/main/config/release/install.yaml
 
+      # 10) Bootstrap Flux into this repo
       - name: Flux bootstrap to GitHub
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -72,27 +91,33 @@ jobs:
     needs: reset-and-bootstrap
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
       - name: Install kustomize
         run: |
           curl -sL \
             "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${{ env.KUSTOMIZE_VERSION }}/kustomize_${{ env.KUSTOMIZE_VERSION }}_linux_amd64.tar.gz" \
             | tar xz
           sudo mv kustomize /usr/local/bin/
+
       - name: Install kubeconform
         run: |
           curl -sL \
             "https://github.com/yannh/kubeconform/releases/download/${{ env.KUBECONFORM_VERSION }}/kubeconform-linux-amd64.tar.gz" \
             | tar xz
           sudo mv kubeconform /usr/local/bin/
+
       - name: Validate base manifests
         run: |
           kustomize build infrastructure/k8s/base \
             | kubeconform -verbose -summary
+
       - name: Validate dev overlay
         run: |
           kustomize build infrastructure/k8s/overlays/dev \
             | kubeconform -verbose -summary
+
       - name: Validate prod overlay
         run: |
           kustomize build infrastructure/k8s/overlays/prod \
