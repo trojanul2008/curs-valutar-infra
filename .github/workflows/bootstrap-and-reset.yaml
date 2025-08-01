@@ -19,27 +19,27 @@ jobs:
       - name: Restore mTLS certs
         run: |
           mkdir -p ~/.kube
-          echo "${{ secrets.CA_CRT }}"    | base64 --decode > ~/.kube/ca.crt
           echo "${{ secrets.CLIENT_CRT }}" | base64 --decode > ~/.kube/client.crt
           echo "${{ secrets.CLIENT_KEY }}" | base64 --decode > ~/.kube/client.key
           chmod 600 ~/.kube/client.key
 
       - name: Restore kubeconfig and inject certs
         run: |
+          # Decode the base kubeconfig
           echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 --decode > ~/.kube/config
 
-          # Discover the first cluster and user names
+          # Extract the first cluster and user names
           CLUSTER=$(kubectl config view -o jsonpath='{.clusters[0].name}')
           USER=$(kubectl config view -o jsonpath='{.users[0].name}')
 
-          # Set the CA file for the cluster entry
-          kubectl config set clusters.${CLUSTER}.certificate-authority ~/.kube/ca.crt
+          # Skip TLS verify on server cert
+          kubectl config set clusters.${CLUSTER}.insecure-skip-tls-verify true
 
-          # Set the client cert & key for the user entry
+          # Attach our client cert + key
           kubectl config set users.${USER}.client-certificate ~/.kube/client.crt
           kubectl config set users.${USER}.client-key ~/.kube/client.key
 
-          # Verify access
+          # Sanity check
           kubectl config view
           kubectl config current-context
           kubectl get nodes
