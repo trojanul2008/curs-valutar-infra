@@ -1,0 +1,102 @@
+name: 🚀 Reset & Bootstrap Infra
+
+# Manual trigger only
+on:
+  workflow_dispatch:
+
+env:
+  # tool versions
+  KUSTOMIZE_VERSION: v5.0.2
+  KUBECONFORM_VERSION: v0.6.4
+  KYVERNO_VERSION: v1.12.4
+
+jobs:
+  reset-and-bootstrap:
+    name: Reset Cluster & Flux Bootstrap
+    runs-on: ubuntu-latest
+    steps:
+      # 1) Check out your code (including wipe-cluster.sh)
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # 2) Restore kubeconfig from the secret you just created
+      - name: Restore kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 --decode > ~/.kube/config
+
+      # 3) Install kubectl CLI
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      # 4) Make your wipe script executable and run it
+      - name: Make wipe-cluster.sh executable
+        run: chmod +x ./wipe-cluster.sh
+
+      - name: Wipe cluster back to zero
+        # TARGET_CONTEXT is the name of your kubeconfig context (we saw "default")
+        env:
+          TARGET_CONTEXT: default
+        run: ./wipe-cluster.sh
+
+      # 5) Install Kyverno (CRDs + controller)
+      - name: Install Kyverno
+        run: |
+          kubectl create ns kyverno || true
+          kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/main/config/release/install.yaml
+
+      # 6) Bootstrap Flux into this GitHub repo
+      - name: Flux bootstrap to GitHub
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          flux bootstrap github \
+            --owner=trojanul2008 \
+            --repository=curs-valutar-infra \
+            --branch=dev \
+            --path=infrastructure/flux/flux-system/manifests \
+            --personal
+
+  validate:
+    name: Validate Kustomize Overlays
+    needs: reset-and-bootstrap
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # Install kustomize
+      - name: Install kustomize
+        run: |
+          curl -sL \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${{ env.KUSTOMIZE_VERSION }}/kustomize_${{ env.KUSTOMIZE_VERSION }}_linux_amd64.tar.gz" \
+            | tar xz
+          sudo mv kustomize /usr/local/bin/
+
+      # Install kubeconform
+      - name: Install kubeconform
+        run: |
+          curl -sL \
+            "https://github.com/yannh/kubeconform/releases/download/${{ env.KUBECONFORM_VERSION }}/kubeconform-linux-amd64.tar.gz" \
+            | tar xz
+          sudo mv kubeconform /usr/local/bin/
+
+      # Validate the base
+      - name: Validate base manifests
+        run: |
+          kustomize build infrastructure/k8s/base \
+            | kubeconform -verbose -summary
+
+      # Validate dev overlay
+      - name: Validate dev overlay
+        run: |
+          kustomize build infrastructure/k8s/overlays/dev \
+            | kubeconform -verbose -summary
+
+      # Validate prod overlay
+      - name: Validate prod overlay
+        run: |
+          kustomize build infrastructure/k8s/overlays/prod \
+            | kubeconform -verbose -summary
