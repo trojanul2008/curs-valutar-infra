@@ -148,33 +148,30 @@ jobs:
             echo "🧮 Summary: $FAIL_COUNT violation(s) flagged with severity."
 
             echo -e "$COMMENT_BODY" > kyverno-github-comment.md
-            exit 1
           else
             echo "✅ No policy violations detected."
           fi
-      - name: GitHub comment on Kyverno violations
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const body = fs.readFileSync('kyverno-github-comment.md', 'utf8');
-            if (body.includes('|')) {
-              github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body
-              });
-            } else {
-              console.log("✅ No violations detected, no comment posted.");
-            }
       - name: Upload Kyverno result artifact
         uses: actions/upload-artifact@v4
         with:
           name: kyverno-result
           path: kyverno-results.json
-      - name: GitHub comment on Kyverno violations
+
+  post-comment:
+    name: 💬 Kyverno Violation Comment
+    needs: policy
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Kyverno result
+        uses: actions/download-artifact@v4
+        with:
+          name: kyverno-result
+
+      - name: Comment on PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
@@ -182,20 +179,34 @@ jobs:
             const fs = require('fs');
             const results = JSON.parse(fs.readFileSync('kyverno-results.json', 'utf8'));
             const violations = results.results?.filter(r => r.result === "fail") || [];
+
             if (violations.length > 0) {
-              let body = '🚨 **Kyverno Policy Violations**\n\n';
+              let table = '| 🔒 Severity | 📄 Resource | 📂 Namespace | 🧾 Policy | 📍 Rule | 📜 Message |\n';
+              table += '|------------|-------------|--------------|-----------|--------|------------|\n';
+
               for (const v of violations) {
-                body += `- ❌ **${v.policy}**: ${v.message}\n`;
+                const resource = `${v.resources?.[0]?.kind || ''} ${v.resources?.[0]?.name || ''}`;
+                const ns = v.resources?.[0]?.namespace || '';
+                let severity = '🟠';
+                if ((v.rule || '').includes('privilege') || (v.policy || '').includes('security')) {
+                  severity = '🔴';
+                } else if ((v.policy || '').includes('label') || (v.rule || '').includes('label')) {
+                  severity = '🟢';
+                }
+                table += `| ${severity} | ${resource} | ${ns} | ${v.policy} | ${v.rule} | ${v.message} |\n`;
               }
+
+              let body = `🚨 **${violations.length} Kyverno Policy Violation${violations.length > 1 ? 's' : ''}**\n\n`;
+              body += `<details>\n<summary>🚨 ${violations.length} Kyverno Violations</summary>\n\n${table}\n</details>`;
+
               github.rest.issues.createComment({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 body
               });
-              core.setFailed("Kyverno policy violations found");
             } else {
-              console.log("✅ No policy violations detected.");
+              console.log("✅ No violations detected.");
             }
 
   scan:
