@@ -47,11 +47,9 @@ jobs:
       - name: Install Kubeconform
         run: |
           curl -sL \
-            "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/"\
-            "kubeconform-linux-amd64.tar.gz" -o kubeconform.tar.gz
-          ls -lh kubeconform.tar.gz
-          tar -xzf kubeconform.tar.gz
-          file kubeconform.tar.gz
+            "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/\
+             kubeconform-linux-amd64" -o kubeconform
+          chmod +x kubeconform
           sudo mv kubeconform /usr/local/bin/
 
       - name: Validate overlays
