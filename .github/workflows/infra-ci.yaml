@@ -71,7 +71,7 @@ jobs:
             --resource base.yaml \
             --output json | jq '.' > kyverno-results.json || true
       - name: Upload Kyverno report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: 🚨-policy-report
           path: kyverno-results.json
@@ -117,7 +117,7 @@ jobs:
           TRIVY_CACHE_DIR="${TRIVY_CACHE_DIR}" scripts/utils/scan-images.sh > trivy-report.txt
           grep 'CRITICAL\|HIGH' trivy-report.txt > trivy-summary.txt || true
       - name: Upload Trivy reports
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: 🛡️-trivy-scan
           path: |
@@ -160,7 +160,7 @@ jobs:
           flux --context=${{ env.KUBECTL_CONTEXT }} diff kustomization curs-valutar-${{ matrix.env }} \
             --path infrastructure/k8s/overlays/${{ matrix.env }} > drift-${{ matrix.env }}.txt || true
       - name: Upload drift report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: 📊-drift-${{ matrix.env }}
           path: drift-${{ matrix.env }}.txt
