@@ -83,12 +83,26 @@ jobs:
           echo "🔍 Failed policy count:"
           jq '.summary.fail' kyverno-results.json
       - name: Show failed Kyverno policies in console and exit if any
-        run: |
+        run: |-
           FAIL_COUNT=$(jq '.summary.fail' kyverno-results.json)
           if [ "$FAIL_COUNT" -gt 0 ]; then
             echo "🚨 Kyverno found $FAIL_COUNT policy violation(s)!"
-            echo "🧾 Details:"
-            jq -r '.results[] | select(.result == "fail") | "- ❌ \(.policy): \(.message)"' kyverno-results.json
+            echo "🧾 Detailed breakdown of failures:"
+            jq -c '.results[] | select(.result == "fail")' kyverno-results.json > kyverno-violations.json
+            while IFS= read -r violation; do
+              POLICY=$(echo "$violation" | jq -r '.policy')
+              RESOURCE_KIND=$(echo "$violation" | jq -r '.resources[0].kind')
+              RESOURCE_NAME=$(echo "$violation" | jq -r '.resources[0].name')
+              RULE=$(echo "$violation" | jq -r '.rule')
+              MESSAGE=$(echo "$violation" | jq -r '.message')
+              echo "- ❌ Policy: $POLICY"
+              echo "  📄 Resource: $RESOURCE_KIND $RESOURCE_NAME"
+              echo "  📍 Rule: $RULE"
+              echo "  📜 Message: $MESSAGE"
+              echo "🔎 Searching for '$RESOURCE_NAME' in manifest files..."
+              grep -rl "metadata:\s*name:\s*$RESOURCE_NAME" infrastructure/ || echo "❓ File not found in expected paths."
+              echo ""
+            done < kyverno-violations.json
             exit 1
           else
             echo "✅ No policy violations detected."
