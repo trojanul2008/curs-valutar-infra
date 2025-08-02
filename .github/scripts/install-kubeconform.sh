@@ -11,6 +11,7 @@ else
   exit 1
 fi
 
-curl -sL "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-$PLATFORM" -o kubeconform
+VERSION="${KUBECONFORM_VERSION:-v0.6.7}"
+curl -sL "https://github.com/yannh/kubeconform/releases/download/${VERSION}/kubeconform-${PLATFORM}" -o kubeconform
 chmod +x kubeconform
 sudo mv kubeconform /usr/local/bin/
