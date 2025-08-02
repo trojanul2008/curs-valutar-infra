@@ -44,6 +44,9 @@ jobs:
           "kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" | tar xz
           sudo mv kustomize /usr/local/bin/
 
+      - name: Make install-kubeconform executable
+        run: chmod +x .github/scripts/install-kubeconform.sh
+
       - name: Install Kubeconform
         run: .github/scripts/install-kubeconform.sh
 
