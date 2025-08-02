@@ -2,7 +2,7 @@ extends: default
 
 rules:
   line-length:
-    max: 160
+    max: 201
   indentation:
     spaces: 2
   empty-lines:

@@ -89,6 +89,14 @@ jobs:
             echo "🚨 Kyverno found $FAIL_COUNT policy violation(s)!"
             echo "🧾 Detailed breakdown of failures:"
             jq -c '.results[] | select(.result == "fail")' kyverno-results.json > kyverno-violations.json
+
+            echo "| 🔒 Severity | 📄 Resource | 📂 Namespace | 🧾 Policy | 📍 Rule | 📜 Message |"
+            echo "|------------|-------------|--------------|-----------|--------|------------|"
+
+            COMMENT_BODY="🚨 **Kyverno Policy Violations**\n\n"
+            COMMENT_BODY+="| 🔒 Severity | 📄 Resource | 📂 Namespace | 🧾 Policy | 📍 Rule | 📜 Message |\n"
+            COMMENT_BODY+="|------------|-------------|--------------|-----------|--------|------------|\n"
+
             while IFS= read -r violation; do
               POLICY=$(echo "$violation" | jq -r '.policy')
               RESOURCE_KIND=$(echo "$violation" | jq -r '.resources[0].kind')
@@ -97,39 +105,70 @@ jobs:
               RESOURCE_API=$(echo "$violation" | jq -r '.resources[0].apiVersion')
               RULE=$(echo "$violation" | jq -r '.rule')
               MESSAGE=$(echo "$violation" | jq -r '.message')
-              # Determine severity emoji based on policy/rule
+
               SEVERITY="🟠"
               if [[ "$RULE" == *"privilege"* || "$POLICY" == *"security"* ]]; then
                 SEVERITY="🔴"
               elif [[ "$POLICY" == *"label"* || "$RULE" == *"label"* ]]; then
                 SEVERITY="🟢"
               fi
-              echo "$SEVERITY ❌ Policy: $POLICY"
-              echo "  📄 Resource: $RESOURCE_KIND $RESOURCE_NAME"
-              echo "  📂 Namespace: $RESOURCE_NS"
-              echo "  🌐 API Version: $RESOURCE_API"
-              echo "  📍 Rule: $RULE"
-              echo "  📜 Message: $MESSAGE"
+
+              echo "| $SEVERITY | $RESOURCE_KIND $RESOURCE_NAME | $RESOURCE_NS | $POLICY | $RULE | $MESSAGE |"
+              COMMENT_BODY+="| $SEVERITY | $RESOURCE_KIND $RESOURCE_NAME | $RESOURCE_NS | $POLICY | $RULE | $MESSAGE |\n"
+
+              echo ""
               echo "🔎 Searching for resource in manifests..."
               MATCHED_FILE=$(grep -rli "$RESOURCE_NAME" infrastructure/ | grep -E '\.ya?ml$' | head -n 1)
+
               if [ -n "$MATCHED_FILE" ]; then
                 echo "📁 Found in: $MATCHED_FILE"
+
                 echo "🔍 Labels via yq:"
-                yq ".metadata.labels" "$MATCHED_FILE" || echo "⚠️ Labels not found."
+                yq eval-all 'select(.kind == "'"$RESOURCE_KIND"'" and .metadata.name == "'"$RESOURCE_NAME"'") | .metadata.labels' "$MATCHED_FILE" || echo "⚠️ Labels not found."
+
+                echo "📝 Annotations:"
+                yq eval-all 'select(.kind == "'"$RESOURCE_KIND"'" and .metadata.name == "'"$RESOURCE_NAME"'") | .metadata.annotations' "$MATCHED_FILE" || echo "⚠️ Annotations not found."
+
                 echo "📦 Full Resource Block:"
-                yq "select(.kind == \"$RESOURCE_KIND\" and .metadata.name == \"$RESOURCE_NAME\")" "$MATCHED_FILE" || echo "⚠️ Could not extract full block."
+                yq eval-all 'select(.kind == "'"$RESOURCE_KIND"'" and .metadata.name == "'"$RESOURCE_NAME"'")' "$MATCHED_FILE" || echo "⚠️ Could not extract full block."
               else
                 echo "❓ File not found in expected paths."
               fi
-              echo "🌐 Fallback: Live resource via kubectl (if available)..."
-              kubectl get "$RESOURCE_KIND" "$RESOURCE_NAME" -n "$RESOURCE_NS" -o json | jq '.metadata.labels' || echo "⚠️ Could not fetch live labels."
+
+              echo "🌐 Fallback: Live resource via kubectl..."
+              if kubectl config current-context &>/dev/null; then
+                kubectl get "$RESOURCE_KIND" "$RESOURCE_NAME" -n "$RESOURCE_NS" -o json 2>/dev/null | jq '.metadata.labels, .metadata.annotations' || echo "⚠️ Could not fetch live labels/annotations."
+              else
+                echo "🚫 Skipping kubectl fallback: No kube context available."
+              fi
+
               echo ""
             done < kyverno-violations.json
+
             echo "🧮 Summary: $FAIL_COUNT violation(s) flagged with severity."
+
+            echo -e "$COMMENT_BODY" > kyverno-github-comment.md
             exit 1
           else
             echo "✅ No policy violations detected."
           fi
+      - name: GitHub comment on Kyverno violations
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('kyverno-github-comment.md', 'utf8');
+            if (body.includes('|')) {
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body
+              });
+            } else {
+              console.log("✅ No violations detected, no comment posted.");
+            }
       - name: Upload Kyverno result artifact
         uses: actions/upload-artifact@v4
         with:
