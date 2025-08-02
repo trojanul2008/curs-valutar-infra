@@ -2,6 +2,10 @@ name: 🚀 Reset & Bootstrap Infra
 
 on:
   workflow_dispatch:
+    inputs:
+      confirm_prod_wipe:
+        description: 'Type YES to confirm wiping production'
+        required: false
 
 env:
   KUSTOMIZE_VERSION: v5.0.2
@@ -12,99 +16,59 @@ jobs:
   reset-and-bootstrap:
     name: Reset Cluster & Flux Bootstrap
     runs-on: ubuntu-latest
+
     steps:
-      # 1) Checkout code
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # 2) Restore kubeconfig (points at https://api.istartit.com:443)
-      - name: Restore kubeconfig
+      - name: Restore kubeconfig for remote access
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 --decode > ~/.kube/config
+          kubectl config use-context remote-cloudflare
 
-      # 3) Verify we can reach the API
-      - name: Verify cluster access
+      - name: Verify remote cluster access
         run: |
-          kubectl config view
-          kubectl config current-context
-          kubectl get nodes
+          kubectl --context=remote-cloudflare get nodes
 
-      # 4) Install kubectl
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
         with:
           version: 'latest'
 
-      # 5) Install Flux CLI
       - name: Install Flux CLI
         run: curl -s https://fluxcd.io/install.sh | sudo bash
 
-      # 6) Install Helm CLI
       - name: Install Helm CLI
         run: curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-      # 7) Make wipe script executable
       - name: Make wipe script executable
         run: chmod +x ./wipe-cluster.sh
 
-      # 8) Wipe cluster back to zero
-      - name: Wipe cluster back to zero
-        env:
-          TARGET_CONTEXT: default
-        run: ./wipe-cluster.sh
+      - name: Wipe dev cluster back to zero
+        run: |
+          ./wipe-cluster.sh --context remote-cloudflare --env dev
 
-      # 9) Install Kyverno
+      - name: Conditionally wipe prod (on request only)
+        if: ${{ github.event.inputs.confirm_prod_wipe == 'YES' }}
+        run: |
+          echo "⚠️ Wiping production cluster as requested"
+          ./wipe-cluster.sh --context remote-cloudflare --env prod
+
       - name: Install Kyverno
         run: |
-          kubectl create ns kyverno || true
-          kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/main/config/release/install.yaml
+          kubectl --context=remote-cloudflare create ns kyverno || true
+          kubectl --context=remote-cloudflare apply -f \
+             https://raw.githubusercontent.com/kyverno/kyverno/main/config/release/install.yaml
 
-      # 10) Bootstrap Flux
       - name: Flux bootstrap to GitHub
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           flux bootstrap github \
+            --context=remote-cloudflare \
             --owner=trojanul2008 \
             --repository=curs-valutar-infra \
             --branch=dev \
             --path=infrastructure/flux/flux-system/manifests \
             --personal
-
-  validate:
-    name: Validate Kustomize Overlays
-    needs: reset-and-bootstrap
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Install kustomize
-        run: |
-          curl -sL \
-            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${{ env.KUSTOMIZE_VERSION }}/kustomize_${{ env.KUSTOMIZE_VERSION }}_linux_amd64.tar.gz" \
-            | tar xz
-          sudo mv kustomize /usr/local/bin/
-
-      - name: Install kubeconform
-        run: |
-          curl -sL \
-            "https://github.com/yannh/kubeconform/releases/download/${{ env.KUBECONFORM_VERSION }}/kubeconform-linux-amd64.tar.gz" \
-            | tar xz
-          sudo mv kubeconform /usr/local/bin/
-
-      - name: Validate base manifests
-        run: |
-          kustomize build infrastructure/k8s/base \
-            | kubeconform -verbose -summary
-
-      - name: Validate dev overlay
-        run: |
-          kustomize build infrastructure/k8s/overlays/dev \
-            | kubeconform -verbose -summary
-
-      - name: Validate prod overlay
-        run: |
-          kustomize build infrastructure/k8s/overlays/prod \
-            | kubeconform -verbose -summary

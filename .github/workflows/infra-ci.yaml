@@ -1,20 +1,19 @@
-name: Infra Validation
+name: 🚦 Infra CI Pipeline
 
 on:
   push:
-    branches:
-      - dev
-      - prod
+    branches: [dev, prod]
   pull_request:
-    branches:
-      - dev
+    branches: [dev]
+  workflow_dispatch:
 
 env:
   KUSTOMIZE_VERSION: v5.0.2
-  KUBECONFORM_VERSION: 0.6.4
+  KUBECONFORM_VERSION: v0.6.4
   KYVERNO_VERSION: v1.12.4
   YQ_VERSION: v4.43.1
   TRIVY_CACHE_DIR: /tmp/trivy-cache
+  KUBECTL_CONTEXT: remote-cloudflare
 
 jobs:
   lint:
@@ -25,23 +24,12 @@ jobs:
       - uses: actions/setup-python@v4
         with:
           python-version: '3.x'
-      - name: Cache pip
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
       - name: Install yamllint
         run: pip install yamllint
-      - name: Debug - Show yamllint version
-        run: yamllint --version
-      - name: Lint YAML
+      - name: Lint all YAML files
         run: |
-          echo "Linting YAML files..."
           find infrastructure -name '*.yaml' -o -name '*.yml' \
             | xargs yamllint -c .yamllint.yml
-          echo "YAML linting completed"
 
   schema:
     name: Schema Validation
@@ -49,49 +37,23 @@ jobs:
     needs: lint
     steps:
       - uses: actions/checkout@v4
-      - name: Debug - Show environment
-        run: env | sort
       - name: Install Kustomize
         run: |
-          echo "Installing Kustomize $KUSTOMIZE_VERSION"
-          BASE_URL="https://github.com/kubernetes-sigs/kustomize"
-          RELEASE_PATH="releases/download/kustomize%2F$KUSTOMIZE_VERSION"
-          FILE="kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
-          curl -sL "$BASE_URL/$RELEASE_PATH/$FILE" -o kustomize.tar.gz
-          tar xzf kustomize.tar.gz
+          curl -sL \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/"\
+          "kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" | tar xz
           sudo mv kustomize /usr/local/bin/
-          kustomize version
       - name: Install Kubeconform
         run: |
-          echo "Installing Kubeconform $KUBECONFORM_VERSION"
-          BASE_URL="https://github.com/yannh/kubeconform"
-          RELEASE_PATH="releases/download/v$KUBECONFORM_VERSION"
-          FILE="kubeconform-linux-amd64.tar.gz"
-          curl -sL "$BASE_URL/$RELEASE_PATH/$FILE" -o kubeconform.tar.gz
-          tar xzf kubeconform.tar.gz
+          curl -sL \
+            "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/"\
+          "kubeconform-linux-amd64.tar.gz" -o kubeconform.tar.gz
           sudo mv kubeconform /usr/local/bin/
-          kubeconform -v
-      - name: Validate base
+      - name: Validate overlays
         run: |
-          echo "Validating base manifests..."
-          kustomize build infrastructure/k8s/base \
-            | tee base-manifests.yaml \
-            | kubeconform -verbose -summary
-          echo "Base validation completed"
-      - name: Validate dev overlay
-        run: |
-          echo "Validating dev overlay..."
-          kustomize build infrastructure/k8s/overlays/dev \
-            | tee dev-manifests.yaml \
-            | kubeconform -verbose -summary
-          echo "Dev overlay validation completed"
-      - name: Validate prod overlay
-        run: |
-          echo "Validating prod overlay..."
-          kustomize build infrastructure/k8s/overlays/prod \
-            | tee prod-manifests.yaml \
-            | kubeconform -verbose -summary
-          echo "Prod overlay validation completed"
+          kustomize build infrastructure/k8s/base | kubeconform -verbose -summary
+          kustomize build infrastructure/k8s/overlays/dev | kubeconform -verbose -summary
+          kustomize build infrastructure/k8s/overlays/prod | kubeconform -verbose -summary
 
   policy:
     name: Kyverno Policy Check
@@ -103,91 +65,47 @@ jobs:
         uses: kyverno/action-install-cli@v0.2.0
         with:
           release: ${{ env.KYVERNO_VERSION }}
-      - name: Debug - Show Kyverno version
-        run: kyverno version
-      - name: Test Kyverno policies
+      - name: Apply Kyverno policies
         run: |
-          echo "Applying Kyverno policies..."
-          kustomize build infrastructure/k8s/base > base-manifests.yaml
-          kyverno apply infrastructure/kyverno/ \
-            --resource base-manifests.yaml \
+          kustomize build infrastructure/k8s/base > base.yaml
+          kyverno apply infrastructure/kyverno \
+            --resource base.yaml \
             --output json > kyverno-results.json || true
-
-          if jq -e '.failed | length > 0' kyverno-results.json; then
-            echo "❌ Kyverno policy violations detected:"
-            jq -r '.failed[] | "RESOURCE: \(.resource.kind)/\(.resource.name)"' \
-              kyverno-results.json
-            jq -r '.failed[] | "POLICY: \(.policy) | RULE: \(.rule)"' \
-              kyverno-results.json
-            exit 1
-          else
-            echo "✅ All Kyverno policies passed"
-          fi
+          jq -e '.failed | length == 0' kyverno-results.json \
+            && echo "✅ All policies passed" || exit 1
 
   scan:
-    name: Image Vulnerability Scan
+    name: Container Image Scan
     runs-on: ubuntu-latest
     needs: policy
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install tools
+      - name: Install yq and Trivy
         run: |
-          # Install dependencies
-          sudo apt-get update
-          sudo apt-get install -y jq
-
-          # Install yq
-          echo "Installing yq $YQ_VERSION"
-          sudo wget "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64" \
-            -O /usr/bin/yq
+          sudo wget "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64" -O /usr/bin/yq
           sudo chmod +x /usr/bin/yq
-          yq --version
-
-          # Install Trivy
-          echo "Installing Trivy"
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | \
-            sudo sh -s -- -b /usr/local/bin v0.65.0
-
-      - name: Pre-cache vulnerability database
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sudo sh -s -- -b /usr/local/bin v0.65.0
+      - name: Cache vulnerability DB
         run: |
-          mkdir -p "$TRIVY_CACHE_DIR"
-          trivy image --download-db-only --cache-dir "$TRIVY_CACHE_DIR"
-
+          mkdir -p "${TRIVY_CACHE_DIR}"
+          trivy image --download-db-only --cache-dir "${TRIVY_CACHE_DIR}"
       - name: Scan container images
         run: |
           chmod +x .github/scripts/scan-images.sh
-          mkdir -p "$TRIVY_CACHE_DIR"
-          TRIVY_CACHE_DIR="$TRIVY_CACHE_DIR" .github/scripts/scan-images.sh
-
-      - name: Upload scan reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: security-reports
-          path: |
-            image-scan-report.txt
-            vulnerability-details.txt
-            trivy-scan-*.json
+          TRIVY_CACHE_DIR="${TRIVY_CACHE_DIR}" .github/scripts/scan-images.sh
 
   drift:
-    name: Drift Detection
+    name: Drift Detection via Flux
     runs-on: ubuntu-latest
     needs: scan
     steps:
       - uses: actions/checkout@v4
-      - name: Debug - Show Flux version
+      - name: Install Flux
+        run: curl -s https://fluxcd.io/install.sh | sudo bash
+      - name: Detect Drift in Environments
         run: |
-          curl -s https://fluxcd.io/install.sh | sudo bash
-          flux --version
-      - name: Check for configuration drift
-        run: |
-          echo "Checking for drift in dev environment..."
-          kustomize build infrastructure/k8s/overlays/dev > dev-manifests.yaml
-          flux diff kustomization curs-valutar-dev \
+          flux --context=${{ env.KUBECTL_CONTEXT }} diff kustomization curs-valutar-dev \
             --path infrastructure/k8s/overlays/dev || echo "✅ No drift in dev"
-
-          echo "Checking for drift in prod environment..."
-          kustomize build infrastructure/k8s/overlays/prod > prod-manifests.yaml
-          flux diff kustomization curs-valutar-prod \
+          flux --context=${{ env.KUBECTL_CONTEXT }} diff kustomization curs-valutar-prod \
             --path infrastructure/k8s/overlays/prod || echo "✅ No drift in prod"
