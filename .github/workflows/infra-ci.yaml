@@ -93,14 +93,25 @@ jobs:
               POLICY=$(echo "$violation" | jq -r '.policy')
               RESOURCE_KIND=$(echo "$violation" | jq -r '.resources[0].kind')
               RESOURCE_NAME=$(echo "$violation" | jq -r '.resources[0].name')
+              RESOURCE_NS=$(echo "$violation" | jq -r '.resources[0].namespace')
+              RESOURCE_API=$(echo "$violation" | jq -r '.resources[0].apiVersion')
               RULE=$(echo "$violation" | jq -r '.rule')
               MESSAGE=$(echo "$violation" | jq -r '.message')
               echo "- ❌ Policy: $POLICY"
               echo "  📄 Resource: $RESOURCE_KIND $RESOURCE_NAME"
+              echo "  📂 Namespace: $RESOURCE_NS"
+              echo "  🌐 API Version: $RESOURCE_API"
               echo "  📍 Rule: $RULE"
               echo "  📜 Message: $MESSAGE"
-              echo "🔎 Searching for '$RESOURCE_NAME' in manifest files..."
-              grep -rl "metadata:\s*name:\s*$RESOURCE_NAME" infrastructure/ || echo "❓ File not found in expected paths."
+              echo "🔎 Trying to locate this resource in your manifests..."
+              MATCHED_FILE=$(grep -rli "$RESOURCE_NAME" infrastructure/ | grep -E '\.ya?ml$' | head -n 1)
+              if [ -n "$MATCHED_FILE" ]; then
+                echo "📁 Found in: $MATCHED_FILE"
+                echo "🔍 Labels:"
+                grep -A 5 "name: $RESOURCE_NAME" "$MATCHED_FILE" | grep 'labels:' -A 5 || echo "⚠️ Labels not found near definition."
+              else
+                echo "❓ File not found in expected paths."
+              fi
               echo ""
             done < kyverno-violations.json
             exit 1
