@@ -43,12 +43,15 @@ jobs:
             "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/"\
           "kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" | tar xz
           sudo mv kustomize /usr/local/bin/
+
       - name: Install Kubeconform
         run: |
           curl -sL \
             "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/"\
-          "kubeconform-linux-amd64.tar.gz" -o kubeconform.tar.gz
+            "kubeconform-linux-amd64.tar.gz" -o kubeconform.tar.gz
+          tar -xzf kubeconform.tar.gz
           sudo mv kubeconform /usr/local/bin/
+
       - name: Validate overlays
         run: |
           kustomize build infrastructure/k8s/base | kubeconform -verbose -summary
