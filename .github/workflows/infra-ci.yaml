@@ -177,6 +177,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
+            const core = require('@actions/core'); // ⛔ to trigger job failure
             const results = JSON.parse(fs.readFileSync('kyverno-results.json', 'utf8'));
             const violations = results.results?.filter(r => r.result === "fail") || [];
 
@@ -193,18 +194,26 @@ jobs:
                 } else if ((v.policy || '').includes('label') || (v.rule || '').includes('label')) {
                   severity = '🟢';
                 }
-                table += `| ${severity} | ${resource} | ${ns} | ${v.policy} | ${v.rule} | ${v.message} |\n`;
+
+                const message = v.message.length > 140
+                  ? `<details><summary>View</summary>${v.message}</details>`
+                  : v.message;
+                table += `| ${severity} | ${resource} | ${ns} | ${v.policy} | ${v.rule} | ${message} |\n`;    
               }
 
               let body = `🚨 **${violations.length} Kyverno Policy Violation${violations.length > 1 ? 's' : ''}**\n\n`;
               body += `<details>\n<summary>🚨 ${violations.length} Kyverno Violations</summary>\n\n${table}\n</details>`;
 
+              // Leave a comment on PR
               github.rest.issues.createComment({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 body
               });
+
+              // 🔥 Fail the job intentionally
+              core.setFailed(`${violations.length} Kyverno violation(s) detected`);
             } else {
               console.log("✅ No violations detected.");
             }
