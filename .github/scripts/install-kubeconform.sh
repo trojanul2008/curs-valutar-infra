@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -e
+
+ARCH=$(uname -m)
+if [ "$ARCH" = "x86_64" ]; then
+  PLATFORM="linux-amd64"
+elif [ "$ARCH" = "aarch64" ]; then
+  PLATFORM="linux-arm64"
+else
+  echo "❌ Unsupported architecture: $ARCH"
+  exit 1
+fi
+
+curl -sL "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-$PLATFORM" -o kubeconform
+chmod +x kubeconform
+sudo mv kubeconform /usr/local/bin/
