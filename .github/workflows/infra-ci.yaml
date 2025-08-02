@@ -84,72 +84,99 @@ jobs:
           jq '.summary.fail' kyverno-results.json
       - name: Show failed Kyverno policies in console and exit if any
         run: |-
+          # ────────────────────────────────────────────────────────────────
+          # 1.  Count failed results
+          # ────────────────────────────────────────────────────────────────
           FAIL_COUNT=$(jq '.summary.fail' kyverno-results.json)
+
           if [ "$FAIL_COUNT" -gt 0 ]; then
             echo "🚨 Kyverno found $FAIL_COUNT policy violation(s)!"
             echo "🧾 Listing sorted violations by severity..."
 
-            # Sort violations by severity category: 🔴 > 🟠 > 🟢
-            jq -c '.results[] | select(.result == "fail")' kyverno-results.json \
-              | jq -s '
-                  sort_by(
-                    if ((.policy | type == "string") and (.policy | test("security")) or
-                        (.rule | type == "string") and (.rule | test("privilege"))) then 1
-                    elif ((.policy | type == "string") and (.policy | test("label")) or
-                        (.rule | type == "string") and (.rule | test("label"))) then 3
-                    else 2 end
-                  )[]' > kyverno-violations.json
+            # ──────────────────────────────────────────────────────────────
+            # 2.  Build a severity-sorted, compact list of failed results
+            #     🔴 (security / privilege)  → sort key 1
+            #     🟠 (everything else)       → sort key 2
+            #     🟢 (labelling)             → sort key 3
+            # ──────────────────────────────────────────────────────────────
+            jq -c '
+              .results
+              | map(select(.result == "fail"))
+              | sort_by(
+                  if   ((.policy | type=="string") and (.policy | test("security")))
+                    or ((.rule   | type=="string") and (.rule   | test("privilege")))
+                  then 1
+                  elif ((.policy | type=="string") and (.policy | test("label")))
+                    or ((.rule   | type=="string") and (.rule   | test("label")))
+                  then 3
+                  else 2
+                  end
+                )
+              | .[]
+            ' kyverno-results.json > kyverno-violations.json
 
+            # ──────────────────────────────────────────────────────────────
+            # 3.  Pretty-print each violation + build GitHub comment body
+            # ──────────────────────────────────────────────────────────────
             COMMENT_BODY="🚨 **Kyverno Policy Violations**\n\n"
 
             while IFS= read -r violation; do
-              POLICY=$(echo "$violation" | jq -r '.policy')
+              POLICY=$(echo "$violation"   | jq -r '.policy')
               RESOURCE_KIND=$(echo "$violation" | jq -r '.resources[0].kind')
               RESOURCE_NAME=$(echo "$violation" | jq -r '.resources[0].name')
-              RESOURCE_NS=$(echo "$violation" | jq -r '.resources[0].namespace')
-              RULE=$(echo "$violation" | jq -r '.rule')
-              MESSAGE=$(echo "$violation" | jq -r '.message')
+              RESOURCE_NS=$(echo "$violation"   | jq -r '.resources[0].namespace')
+              RULE=$(echo "$violation"     | jq -r '.rule')
+              MESSAGE=$(echo "$violation"  | jq -r '.message')
 
+              # Pick the emoji severity we already encoded in sort-by
               SEVERITY="🟠"
-              if [[ "$RULE" == *"privilege"* || "$POLICY" == *"security"* ]]; then
-                SEVERITY="🔴"
-              elif [[ "$POLICY" == *"label"* || "$RULE" == *"label"* ]]; then
-                SEVERITY="🟢"
-              fi
+              [[ "$RULE"   == *"privilege"* || "$POLICY" == *"security"* ]] && SEVERITY="🔴"
+              [[ "$RULE"   == *"label"*     || "$POLICY" == *"label"*    ]] && SEVERITY="🟢"
 
               echo ""
               echo "$SEVERITY $RESOURCE_KIND \"$RESOURCE_NAME\" in namespace \"$RESOURCE_NS\""
               echo "    ├─ Policy: $POLICY"
-              echo "    ├─ Rule: $RULE"
-              echo "    └─ Message: $MESSAGE"
+              echo "    ├─ Rule:   $RULE"
+              echo "    └─ Message:$MESSAGE"
 
               COMMENT_BODY+="$SEVERITY $RESOURCE_KIND \"$RESOURCE_NAME\" in namespace \"$RESOURCE_NS\"\n"
               COMMENT_BODY+="• Policy: $POLICY\n"
-              COMMENT_BODY+="• Rule: $RULE\n"
-              COMMENT_BODY+="• Message: $MESSAGE\n\n"
+              COMMENT_BODY+="• Rule:   $RULE\n"
+              COMMENT_BODY+="• Message:$MESSAGE\n\n"
 
+              # ────────────────────────────────────────────────────────────
+              # 4.  Try to locate the resource in repo manifests
+              # ────────────────────────────────────────────────────────────
               echo ""
               echo "🔎 Searching for resource in manifests..."
-              MATCHED_FILE=$(grep -rli "$RESOURCE_NAME" infrastructure/ | grep -E '\.ya?ml$' | head -n 1)
+              MATCHED_FILE=$(grep -rli -- "$RESOURCE_NAME" infrastructure/ | grep -E '\.ya?ml$' | head -n 1)
 
               if [ -n "$MATCHED_FILE" ]; then
                 echo "📁 Found in: $MATCHED_FILE"
 
                 echo "🔍 Labels via yq:"
-                yq eval-all 'select(.kind == "'"$RESOURCE_KIND"'" and .metadata.name == "'"$RESOURCE_NAME"'") | .metadata.labels' "$MATCHED_FILE" || echo "⚠️ Labels not found."
+                yq eval-all 'select(.kind == "'"$RESOURCE_KIND"'" and .metadata.name == "'"$RESOURCE_NAME"'") | .metadata.labels' "$MATCHED_FILE" \
+                  || echo "⚠️  Labels not found."
 
                 echo "📝 Annotations:"
-                yq eval-all 'select(.kind == "'"$RESOURCE_KIND"'" and .metadata.name == "'"$RESOURCE_NAME"'") | .metadata.annotations' "$MATCHED_FILE" || echo "⚠️ Annotations not found."
+                yq eval-all 'select(.kind == "'"$RESOURCE_KIND"'" and .metadata.name == "'"$RESOURCE_NAME"'") | .metadata.annotations' "$MATCHED_FILE" \
+                  || echo "⚠️  Annotations not found."
 
                 echo "📦 Full Resource Block:"
-                yq eval-all 'select(.kind == "'"$RESOURCE_KIND"'" and .metadata.name == "'"$RESOURCE_NAME"'")' "$MATCHED_FILE" || echo "⚠️ Could not extract full block."
+                yq eval-all 'select(.kind == "'"$RESOURCE_KIND"'" and .metadata.name == "'"$RESOURCE_NAME"'")' "$MATCHED_FILE" \
+                  || echo "⚠️  Could not extract full block."
               else
                 echo "❓ File not found in expected paths."
               fi
 
+              # ────────────────────────────────────────────────────────────
+              # 5.  Optional live-cluster fallback
+              # ────────────────────────────────────────────────────────────
               echo "🌐 Fallback: Live resource via kubectl..."
               if kubectl config current-context &>/dev/null; then
-                kubectl get "$RESOURCE_KIND" "$RESOURCE_NAME" -n "$RESOURCE_NS" -o json 2>/dev/null | jq '.metadata.labels, .metadata.annotations' || echo "⚠️ Could not fetch live labels/annotations."
+                kubectl get "$RESOURCE_KIND" "$RESOURCE_NAME" -n "$RESOURCE_NS" -o json 2>/dev/null \
+                  | jq '.metadata.labels, .metadata.annotations' \
+                  || echo "⚠️  Could not fetch live labels/annotations."
               else
                 echo "🚫 Skipping kubectl fallback: No kube context available."
               fi
@@ -163,11 +190,6 @@ jobs:
           else
             echo "✅ No policy violations detected."
           fi
-      - name: Upload Kyverno result artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: kyverno-result
-          path: kyverno-results.json
 
   post-comment:
     name: 💬 Kyverno Violation Comment
