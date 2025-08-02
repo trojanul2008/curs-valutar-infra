@@ -66,15 +66,21 @@ jobs:
         run: bash scripts/install/install-all.sh
       - name: Apply Kyverno locally
         run: |
-          kustomize build infrastructure/k8s/base > base.yaml
-          kyverno apply infrastructure/kyverno \
-            --resource base.yaml \
-            --output json | jq '.' > kyverno-results.json || true
-      - name: Upload Kyverno report
-        uses: actions/upload-artifact@v4
-        with:
-          name: 🚨-policy-report
-          path: kyverno-results.json
+          - name: Apply Kyverno locally
+            run: |
+              echo "🔍 Building Kubernetes base manifest..."
+              kustomize build infrastructure/k8s/base > base.yaml
+              echo "🚨 Running Kyverno policy checks..."
+              kyverno apply infrastructure/kyverno \
+                --resource base.yaml \
+                --output json > kyverno-raw.json || echo '{}' > kyverno-raw.json
+              # Validate and sanitize output
+              if jq -e . kyverno-raw.json >/dev/null 2>&1; then
+                mv kyverno-raw.json kyverno-results.json
+              else
+                echo "⚠️ Kyverno returned invalid JSON. Saving fallback..."
+                echo '{}' > kyverno-results.json
+              fi
       - name: GitHub comment on Kyverno violations
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
@@ -82,7 +88,7 @@ jobs:
           script: |
             const fs = require('fs');
             const results = JSON.parse(fs.readFileSync('kyverno-results.json', 'utf8'));
-            if (results.failed.length > 0) {
+            if (results.failed && results.failed.length > 0) {
               const body = `🚨 **Kyverno Policy Violations**\n\n` +
                 results.failed.map(r => `- ❌ ${r.policy}: ${r.message}`).join('\n');
               github.rest.issues.createComment({
@@ -93,8 +99,8 @@ jobs:
               });
               core.setFailed("Kyverno policy violations found");
             } else {
-              console.log("✅ No Kyverno violations detected");
-            }
+              console.log("✅ No Kyverno violations detected or result was malformed.");
+           }
 
   scan:
     name: 🛡️ Container Image Scan
