@@ -93,8 +93,10 @@ jobs:
             jq -c '.results[] | select(.result == "fail")' kyverno-results.json \
               | jq -s '
                   sort_by(
-                    if (.policy | test("security") or .rule | test("privilege")) then 1
-                    elif (.policy | test("label") or .rule | test("label")) then 3
+                    if ((.policy | type == "string") and (.policy | test("security")) or
+                        (.rule | type == "string") and (.rule | test("privilege"))) then 1
+                    elif ((.policy | type == "string") and (.policy | test("label")) or
+                        (.rule | type == "string") and (.rule | test("label"))) then 3
                     else 2 end
                   )[]' > kyverno-violations.json
 
