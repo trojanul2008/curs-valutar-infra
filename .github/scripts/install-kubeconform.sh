@@ -12,6 +12,7 @@ else
 fi
 
 VERSION="${KUBECONFORM_VERSION:-v0.6.7}"
-curl -sL "https://github.com/yannh/kubeconform/releases/download/${VERSION}/kubeconform-${PLATFORM}" -o kubeconform
+
+curl -sL "https://github.com/yannh/kubeconform/releases/download/${VERSION}/kubeconform-${PLATFORM}.tar.gz" | tar xz
 chmod +x kubeconform
 sudo mv kubeconform /usr/local/bin/
