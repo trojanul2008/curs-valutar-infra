@@ -56,60 +56,60 @@ jobs:
           kustomize build infrastructure/k8s/base | kubeconform -verbose -summary
           kustomize build infrastructure/k8s/overlays/${{ matrix.overlay }} | kubeconform -verbose -summary
 
-policy:
-  name: 🚨 Kyverno Policy Check
-  runs-on: ubuntu-latest
-  needs: schema
-  steps:
-    - uses: actions/checkout@v4
-    - name: Install tools
-      run: bash scripts/install/install-all.sh
-    - name: Apply Kyverno and generate report
-      run: |
-        echo "🔍 Building Kubernetes base manifest..."
-        kustomize build infrastructure/k8s/base > base.yaml
-        echo "🚨 Running Kyverno policy checks..."
-        kyverno apply infrastructure/kyverno \
-          --resource base.yaml \
-          --policy-report > kyverno-raw.txt
-        echo "📄 Extracting PolicyReport YAML..."
-        awk '/^apiVersion:/,0' kyverno-raw.txt > kyverno-policyreport.yaml
-        echo "🔄 Converting YAML to JSON..."
-        yq -o=json kyverno-policyreport.yaml > kyverno-results.json
-    - name: Debug Kyverno Output
-      run: cat kyverno-results.json
-    - name: Extract failed Kyverno policy count
-      run: |
-        echo "🔍 Failed policy count:"
-        jq '.summary.fail' kyverno-results.json
-    - name: Upload Kyverno result artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: kyverno-result
-        path: kyverno-results.json
-    - name: GitHub comment on Kyverno violations
-      if: github.event_name == 'pull_request'
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const fs = require('fs');
-          const results = JSON.parse(fs.readFileSync('kyverno-results.json', 'utf8'));
-          const violations = results.results?.filter(r => r.result === "fail") || [];
-          if (violations.length > 0) {
-            let body = '🚨 **Kyverno Policy Violations**\n\n';
-            for (const v of violations) {
-              body += `- ❌ **${v.policy}**: ${v.message}\n`;
+  policy:
+    name: 🚨 Kyverno Policy Check
+    runs-on: ubuntu-latest
+    needs: schema
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: bash scripts/install/install-all.sh
+      - name: Apply Kyverno and generate report
+        run: |
+          echo "🔍 Building Kubernetes base manifest..."
+          kustomize build infrastructure/k8s/base > base.yaml
+          echo "🚨 Running Kyverno policy checks..."
+          kyverno apply infrastructure/kyverno \
+            --resource base.yaml \
+            --policy-report > kyverno-raw.txt
+          echo "📄 Extracting PolicyReport YAML..."
+          awk '/^apiVersion:/,0' kyverno-raw.txt > kyverno-policyreport.yaml
+          echo "🔄 Converting YAML to JSON..."
+          yq -o=json kyverno-policyreport.yaml > kyverno-results.json
+      - name: Debug Kyverno Output
+        run: cat kyverno-results.json
+      - name: Extract failed Kyverno policy count
+        run: |
+          echo "🔍 Failed policy count:"
+          jq '.summary.fail' kyverno-results.json
+      - name: Upload Kyverno result artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kyverno-result
+          path: kyverno-results.json
+      - name: GitHub comment on Kyverno violations
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const results = JSON.parse(fs.readFileSync('kyverno-results.json', 'utf8'));
+            const violations = results.results?.filter(r => r.result === "fail") || [];
+            if (violations.length > 0) {
+              let body = '🚨 **Kyverno Policy Violations**\n\n';
+              for (const v of violations) {
+                body += `- ❌ **${v.policy}**: ${v.message}\n`;
+              }
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body
+              });
+              core.setFailed("Kyverno policy violations found");
+            } else {
+              console.log("✅ No policy violations detected.");
             }
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body
-            });
-            core.setFailed("Kyverno policy violations found");
-          } else {
-            console.log("✅ No policy violations detected.");
-          }
 
   scan:
     name: 🛡️ Container Image Scan
