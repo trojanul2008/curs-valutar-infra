@@ -171,6 +171,13 @@ jobs:
         with:
           name: kyverno-result
 
+      - name: Check Kyverno failure count
+        id: check
+        run: |
+          FAIL_COUNT=$(jq '.summary.fail' kyverno-results.json)
+          echo "🔍 Detected Kyverno violations: $FAIL_COUNT"
+          echo "fail_count=$FAIL_COUNT" >> $GITHUB_OUTPUT
+
       - name: Comment on PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
@@ -178,6 +185,7 @@ jobs:
           script: |
             const fs = require('fs');
             const core = require('@actions/core'); // ⛔ to trigger job failure
+
             const results = JSON.parse(fs.readFileSync('kyverno-results.json', 'utf8'));
             const violations = results.results?.filter(r => r.result === "fail") || [];
 
@@ -195,10 +203,10 @@ jobs:
                   severity = '🟢';
                 }
 
-                const message = v.message.length > 140
+                const message = v.message.length > 100
                   ? `<details><summary>View</summary>${v.message}</details>`
                   : v.message;
-                table += `| ${severity} | ${resource} | ${ns} | ${v.policy} | ${v.rule} | ${message} |\n`;    
+                table += `| ${severity} | ${resource} | ${ns} | ${v.policy} | ${v.rule} | ${message} |\n`;
               }
 
               let body = `🚨 **${violations.length} Kyverno Policy Violation${violations.length > 1 ? 's' : ''}**\n\n`;
@@ -217,6 +225,13 @@ jobs:
             } else {
               console.log("✅ No violations detected.");
             }
+
+      - name: Upload Kyverno result summary
+        if: steps.check.outputs.fail_count == '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: kyverno-summary
+          path: kyverno-results.json
 
   scan:
     name: 🛡️ Container Image Scan
