@@ -71,7 +71,7 @@ jobs:
           echo "🚨 Running Kyverno policy checks..."
           kyverno apply infrastructure/kyverno \
             --resource base.yaml \
-            --policy-report > kyverno-raw.txt
+            --policy-report | tee kyverno-raw.txt
           echo "📄 Extracting PolicyReport YAML..."
           awk '/^apiVersion:/,0' kyverno-raw.txt > kyverno-policyreport.yaml
           echo "🔄 Converting YAML to JSON..."
@@ -82,6 +82,17 @@ jobs:
         run: |
           echo "🔍 Failed policy count:"
           jq '.summary.fail' kyverno-results.json
+      - name: Show failed Kyverno policies in console and exit if any
+        run: |
+          FAIL_COUNT=$(jq '.summary.fail' kyverno-results.json)
+          if [ "$FAIL_COUNT" -gt 0 ]; then
+            echo "🚨 Kyverno found $FAIL_COUNT policy violation(s)!"
+            echo "🧾 Details:"
+            jq -r '.results[] | select(.result == "fail") | "- ❌ \(.policy): \(.message)"' kyverno-results.json
+            exit 1
+          else
+            echo "✅ No policy violations detected."
+          fi
       - name: Upload Kyverno result artifact
         uses: actions/upload-artifact@v4
         with:
