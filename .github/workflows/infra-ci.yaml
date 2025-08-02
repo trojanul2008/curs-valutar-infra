@@ -50,6 +50,12 @@ jobs:
           chmod +x kubeconform
           sudo mv kubeconform /usr/local/bin/
 
+      - name: Check kubeconform binary
+        run: |
+          file /usr/local/bin/kubeconform
+          ls -l /usr/local/bin/kubeconform
+          head -n 3 /usr/local/bin/kubeconform
+
       - name: Validate overlays
         run: |
           kustomize build infrastructure/k8s/base | kubeconform -verbose -summary
