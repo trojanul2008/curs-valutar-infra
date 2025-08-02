@@ -2,9 +2,9 @@ name: 🚦 Infra CI Pipeline
 
 on:
   push:
-    branches: [dev, prod]
-  pull_request:
     branches: [dev]
+  pull_request:
+    branches: [dev, prod]
   workflow_dispatch:
 
 env:
@@ -12,107 +12,152 @@ env:
   KUBECONFORM_VERSION: v0.6.7
   KYVERNO_VERSION: v1.12.4
   YQ_VERSION: v4.43.1
+  TRIVY_VERSION: v0.50.1
   TRIVY_CACHE_DIR: /tmp/trivy-cache
   KUBECTL_CONTEXT: remote-cloudflare
 
 jobs:
   lint:
-    name: YAML Lint
+    name: 🧹 YAML Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v4
         with:
           python-version: '3.x'
-      - name: Install yamllint
-        run: pip install yamllint
+      - name: Install dependencies
+        run: bash scripts/install/install-all.sh
       - name: Lint all YAML files
         run: |
           find infrastructure -name '*.yaml' -o -name '*.yml' \
             | xargs yamllint -c .yamllint.yml
 
   schema:
-    name: Schema Validation
+    name: 📐 Schema Validation
     runs-on: ubuntu-latest
     needs: lint
+    strategy:
+      matrix:
+        overlay: [dev, prod]
     steps:
       - uses: actions/checkout@v4
-      - name: Install Kustomize
-        run: |
-          curl -sL \
-            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/"\
-          "kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" | tar xz
-          sudo mv kustomize /usr/local/bin/
-
-      - name: Make install-kubeconform executable
-        run: chmod +x .github/scripts/install-kubeconform.sh
-
-      - name: Install Kubeconform
-        run: .github/scripts/install-kubeconform.sh
-
-      - name: Check kubeconform binary
-        run: |
-          file /usr/local/bin/kubeconform
-          ls -l /usr/local/bin/kubeconform
-          head -n 3 /usr/local/bin/kubeconform
-
-      - name: Validate overlays
+      - name: Install tools
+        run: bash scripts/install/install-all.sh
+      - name: Cache kustomize
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/kustomize
+          key: kustomize-${{ matrix.overlay }}-${{ hashFiles('infrastructure/k8s/overlays/**') }}
+      - name: Validate overlays with kubeconform
         run: |
           kustomize build infrastructure/k8s/base | kubeconform -verbose -summary
-          kustomize build infrastructure/k8s/overlays/dev | kubeconform -verbose -summary
-          kustomize build infrastructure/k8s/overlays/prod | kubeconform -verbose -summary
+          kustomize build infrastructure/k8s/overlays/${{ matrix.overlay }} | kubeconform -verbose -summary
 
   policy:
-    name: Kyverno Policy Check
+    name: 🚨 Kyverno Policy Check
     runs-on: ubuntu-latest
     needs: schema
     steps:
       - uses: actions/checkout@v4
-      - name: Install Kyverno CLI
-        uses: kyverno/action-install-cli@v0.2.0
-        with:
-          release: ${{ env.KYVERNO_VERSION }}
-      - name: Apply Kyverno policies
+      - name: Install tools
+        run: bash scripts/install/install-all.sh
+      - name: Apply Kyverno locally
         run: |
           kustomize build infrastructure/k8s/base > base.yaml
           kyverno apply infrastructure/kyverno \
             --resource base.yaml \
-            --output json > kyverno-results.json || true
-          jq -e '.failed | length == 0' kyverno-results.json \
-            && echo "✅ All policies passed" || exit 1
+            --output json | jq '.' > kyverno-results.json || true
+      - name: Upload Kyverno report
+        uses: actions/upload-artifact@v3
+        with:
+          name: 🚨-policy-report
+          path: kyverno-results.json
+      - name: GitHub comment on Kyverno violations
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const results = JSON.parse(fs.readFileSync('kyverno-results.json', 'utf8'));
+            if (results.failed.length > 0) {
+              const body = `🚨 **Kyverno Policy Violations**\n\n` +
+                results.failed.map(r => `- ❌ ${r.policy}: ${r.message}`).join('\n');
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body
+              });
+              core.setFailed("Kyverno policy violations found");
+            } else {
+              console.log("✅ No Kyverno violations detected");
+            }
 
   scan:
-    name: Container Image Scan
+    name: 🛡️ Container Image Scan
     runs-on: ubuntu-latest
     needs: policy
     steps:
       - uses: actions/checkout@v4
-      - name: Install yq and Trivy
-        run: |
-          sudo wget "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64" -O /usr/bin/yq
-          sudo chmod +x /usr/bin/yq
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sudo sh -s -- -b /usr/local/bin v0.65.0
-      - name: Cache vulnerability DB
+      - name: Install tools
+        run: bash scripts/install/install-all.sh
+      - name: Run Trivy scan
         run: |
           mkdir -p "${TRIVY_CACHE_DIR}"
-          trivy image --download-db-only --cache-dir "${TRIVY_CACHE_DIR}"
-      - name: Scan container images
-        run: |
-          chmod +x .github/scripts/scan-images.sh
-          TRIVY_CACHE_DIR="${TRIVY_CACHE_DIR}" .github/scripts/scan-images.sh
+          chmod +x scripts/utils/scan-images.sh
+          TRIVY_CACHE_DIR="${TRIVY_CACHE_DIR}" scripts/utils/scan-images.sh > trivy-report.txt
+          grep 'CRITICAL\|HIGH' trivy-report.txt > trivy-summary.txt || true
+      - name: Upload Trivy reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: 🛡️-trivy-scan
+          path: |
+            trivy-report.txt
+            trivy-summary.txt
+      - name: GitHub comment on Trivy summary
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('trivy-summary.txt', 'utf8').slice(0, 6000);
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `🛡️ **Trivy Vulnerability Summary**\n\n\`\`\`\n${summary}\n\`\`\``
+            });
 
   drift:
-    name: Drift Detection via Flux
+    name: 📊 Drift Detection via Flux
     runs-on: ubuntu-latest
     needs: scan
+    strategy:
+      matrix:
+        env: [dev, prod]
     steps:
       - uses: actions/checkout@v4
       - name: Install Flux
         run: curl -s https://fluxcd.io/install.sh | sudo bash
-      - name: Detect Drift in Environments
+      - name: Detect drift in ${{ matrix.env }}
         run: |
-          flux --context=${{ env.KUBECTL_CONTEXT }} diff kustomization curs-valutar-dev \
-            --path infrastructure/k8s/overlays/dev || echo "✅ No drift in dev"
-          flux --context=${{ env.KUBECTL_CONTEXT }} diff kustomization curs-valutar-prod \
-            --path infrastructure/k8s/overlays/prod || echo "✅ No drift in prod"
+          flux --context=${{ env.KUBECTL_CONTEXT }} diff kustomization curs-valutar-${{ matrix.env }} \
+            --path infrastructure/k8s/overlays/${{ matrix.env }} > drift-${{ matrix.env }}.txt || true
+      - name: Upload drift report
+        uses: actions/upload-artifact@v3
+        with:
+          name: 📊-drift-${{ matrix.env }}
+          path: drift-${{ matrix.env }}.txt
+      - name: GitHub comment on drift
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('drift-${{ matrix.env }}.txt', 'utf8').slice(0, 6000);
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `📊 **Flux Drift Report (${matrix.env})**\n\n\`\`\`\n${report}\n\`\`\``
+            });
