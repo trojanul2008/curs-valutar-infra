@@ -148,6 +148,7 @@ jobs:
             echo "🧮 Summary: $FAIL_COUNT violation(s) flagged with severity."
 
             echo -e "$COMMENT_BODY" > kyverno-github-comment.md
+            exit 1
           else
             echo "✅ No policy violations detected."
           fi
