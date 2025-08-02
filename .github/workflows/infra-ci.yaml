@@ -97,23 +97,35 @@ jobs:
               RESOURCE_API=$(echo "$violation" | jq -r '.resources[0].apiVersion')
               RULE=$(echo "$violation" | jq -r '.rule')
               MESSAGE=$(echo "$violation" | jq -r '.message')
-              echo "- ❌ Policy: $POLICY"
+              # Determine severity emoji based on policy/rule
+              SEVERITY="🟠"
+              if [[ "$RULE" == *"privilege"* || "$POLICY" == *"security"* ]]; then
+                SEVERITY="🔴"
+              elif [[ "$POLICY" == *"label"* || "$RULE" == *"label"* ]]; then
+                SEVERITY="🟢"
+              fi
+              echo "$SEVERITY ❌ Policy: $POLICY"
               echo "  📄 Resource: $RESOURCE_KIND $RESOURCE_NAME"
               echo "  📂 Namespace: $RESOURCE_NS"
               echo "  🌐 API Version: $RESOURCE_API"
               echo "  📍 Rule: $RULE"
               echo "  📜 Message: $MESSAGE"
-              echo "🔎 Trying to locate this resource in your manifests..."
+              echo "🔎 Searching for resource in manifests..."
               MATCHED_FILE=$(grep -rli "$RESOURCE_NAME" infrastructure/ | grep -E '\.ya?ml$' | head -n 1)
               if [ -n "$MATCHED_FILE" ]; then
                 echo "📁 Found in: $MATCHED_FILE"
-                echo "🔍 Labels:"
-                grep -A 5 "name: $RESOURCE_NAME" "$MATCHED_FILE" | grep 'labels:' -A 5 || echo "⚠️ Labels not found near definition."
+                echo "🔍 Labels via yq:"
+                yq ".metadata.labels" "$MATCHED_FILE" || echo "⚠️ Labels not found."
+                echo "📦 Full Resource Block:"
+                yq "select(.kind == \"$RESOURCE_KIND\" and .metadata.name == \"$RESOURCE_NAME\")" "$MATCHED_FILE" || echo "⚠️ Could not extract full block."
               else
                 echo "❓ File not found in expected paths."
               fi
+              echo "🌐 Fallback: Live resource via kubectl (if available)..."
+              kubectl get "$RESOURCE_KIND" "$RESOURCE_NAME" -n "$RESOURCE_NS" -o json | jq '.metadata.labels' || echo "⚠️ Could not fetch live labels."
               echo ""
             done < kyverno-violations.json
+            echo "🧮 Summary: $FAIL_COUNT violation(s) flagged with severity."
             exit 1
           else
             echo "✅ No policy violations detected."
