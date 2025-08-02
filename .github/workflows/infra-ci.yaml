@@ -89,9 +89,18 @@ jobs:
             echo "🚨 Kyverno found $FAIL_COUNT policy violation(s)!"
             echo "🧾 Detailed breakdown of failures:"
             jq -c '.results[] | select(.result == "fail")' kyverno-results.json > kyverno-violations.json
+            
+            # 🧾 Header row
+            printf "| %-2s | %-25s | %-15s | %-30s | %-30s | %-80s |\n" "🔒" "📄 Resource" "📂 Namespace" "🧾 Policy" "📍 Rule" "📜 Message"
 
-            echo "| 🔒 Severity | 📄 Resource | 📂 Namespace | 🧾 Policy | 📍 Rule | 📜 Message |"
-            echo "|------------|-------------|--------------|-----------|--------|------------|"
+            # 📏 Separator row
+            printf "|%s|%s|%s|%s|%s|%s|\n" \
+              "$(printf '%-4s' '' | tr ' ' '-')" \
+              "$(printf '%-27s' '' | tr ' ' '-')" \
+              "$(printf '%-17s' '' | tr ' ' '-')" \
+              "$(printf '%-32s' '' | tr ' ' '-')" \
+              "$(printf '%-32s' '' | tr ' ' '-')" \
+              "$(printf '%-82s' '' | tr ' ' '-')"
 
             COMMENT_BODY="🚨 **Kyverno Policy Violations**\n\n"
             COMMENT_BODY+="| 🔒 Severity | 📄 Resource | 📂 Namespace | 🧾 Policy | 📍 Rule | 📜 Message |\n"
@@ -113,6 +122,11 @@ jobs:
                 SEVERITY="🟢"
               fi
 
+              # ✅ Aligned output to console
+              printf "| %-2s | %-25s | %-15s | %-30s | %-30s | %-80s |\n" \
+                "$SEVERITY" "$RESOURCE_KIND $RESOURCE_NAME" "$RESOURCE_NS" "$POLICY" "$RULE" "$MESSAGE"
+
+               # 📝 Append to GitHub comment
               echo "| $SEVERITY | $RESOURCE_KIND $RESOURCE_NAME | $RESOURCE_NS | $POLICY | $RULE | $MESSAGE |"
               COMMENT_BODY+="| $SEVERITY | $RESOURCE_KIND $RESOURCE_NAME | $RESOURCE_NS | $POLICY | $RULE | $MESSAGE |\n"
 
