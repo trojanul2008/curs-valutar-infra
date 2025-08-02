@@ -87,31 +87,24 @@ jobs:
           FAIL_COUNT=$(jq '.summary.fail' kyverno-results.json)
           if [ "$FAIL_COUNT" -gt 0 ]; then
             echo "🚨 Kyverno found $FAIL_COUNT policy violation(s)!"
-            echo "🧾 Detailed breakdown of failures:"
-            jq -c '.results[] | select(.result == "fail")' kyverno-results.json > kyverno-violations.json
-            
-            # 🧾 Header row
-            printf "| %-2s | %-25s | %-15s | %-30s | %-30s | %-80s |\n" "🔒" "📄 Resource" "📂 Namespace" "🧾 Policy" "📍 Rule" "📜 Message"
+            echo "🧾 Listing sorted violations by severity..."
 
-            # 📏 Separator row
-            printf "|%s|%s|%s|%s|%s|%s|\n" \
-              "$(printf '%-4s' '' | tr ' ' '-')" \
-              "$(printf '%-27s' '' | tr ' ' '-')" \
-              "$(printf '%-17s' '' | tr ' ' '-')" \
-              "$(printf '%-32s' '' | tr ' ' '-')" \
-              "$(printf '%-32s' '' | tr ' ' '-')" \
-              "$(printf '%-82s' '' | tr ' ' '-')"
+            # Sort violations by severity category: 🔴 > 🟠 > 🟢
+            jq -c '.results[] | select(.result == "fail")' kyverno-results.json \
+              | jq -s '
+                  sort_by(
+                    if (.policy | test("security") or .rule | test("privilege")) then 1
+                    elif (.policy | test("label") or .rule | test("label")) then 3
+                    else 2 end
+                  )[]' > kyverno-violations.json
 
             COMMENT_BODY="🚨 **Kyverno Policy Violations**\n\n"
-            COMMENT_BODY+="| 🔒 Severity | 📄 Resource | 📂 Namespace | 🧾 Policy | 📍 Rule | 📜 Message |\n"
-            COMMENT_BODY+="|------------|-------------|--------------|-----------|--------|------------|\n"
 
             while IFS= read -r violation; do
               POLICY=$(echo "$violation" | jq -r '.policy')
               RESOURCE_KIND=$(echo "$violation" | jq -r '.resources[0].kind')
               RESOURCE_NAME=$(echo "$violation" | jq -r '.resources[0].name')
               RESOURCE_NS=$(echo "$violation" | jq -r '.resources[0].namespace')
-              RESOURCE_API=$(echo "$violation" | jq -r '.resources[0].apiVersion')
               RULE=$(echo "$violation" | jq -r '.rule')
               MESSAGE=$(echo "$violation" | jq -r '.message')
 
@@ -122,13 +115,16 @@ jobs:
                 SEVERITY="🟢"
               fi
 
-              # ✅ Aligned output to console
-              printf "| %-2s | %-25s | %-15s | %-30s | %-30s | %-80s |\n" \
-                "$SEVERITY" "$RESOURCE_KIND $RESOURCE_NAME" "$RESOURCE_NS" "$POLICY" "$RULE" "$MESSAGE"
+              echo ""
+              echo "$SEVERITY $RESOURCE_KIND \"$RESOURCE_NAME\" in namespace \"$RESOURCE_NS\""
+              echo "    ├─ Policy: $POLICY"
+              echo "    ├─ Rule: $RULE"
+              echo "    └─ Message: $MESSAGE"
 
-               # 📝 Append to GitHub comment
-              echo "| $SEVERITY | $RESOURCE_KIND $RESOURCE_NAME | $RESOURCE_NS | $POLICY | $RULE | $MESSAGE |"
-              COMMENT_BODY+="| $SEVERITY | $RESOURCE_KIND $RESOURCE_NAME | $RESOURCE_NS | $POLICY | $RULE | $MESSAGE |\n"
+              COMMENT_BODY+="$SEVERITY $RESOURCE_KIND \"$RESOURCE_NAME\" in namespace \"$RESOURCE_NS\"\n"
+              COMMENT_BODY+="• Policy: $POLICY\n"
+              COMMENT_BODY+="• Rule: $RULE\n"
+              COMMENT_BODY+="• Message: $MESSAGE\n\n"
 
               echo ""
               echo "🔎 Searching for resource in manifests..."
@@ -159,8 +155,7 @@ jobs:
               echo ""
             done < kyverno-violations.json
 
-            echo "🧮 Summary: $FAIL_COUNT violation(s) flagged with severity."
-
+            echo "🧮 Summary: $FAIL_COUNT violation(s) flagged."
             echo -e "$COMMENT_BODY" > kyverno-github-comment.md
             exit 1
           else
@@ -175,7 +170,7 @@ jobs:
   post-comment:
     name: 💬 Kyverno Violation Comment
     needs: policy
-    if: always()
+    if: needs.policy.result == 'success'
     runs-on: ubuntu-latest
 
     steps:
@@ -194,46 +189,53 @@ jobs:
           echo "fail_count=$FAIL_COUNT" >> $GITHUB_OUTPUT
 
       - name: Comment on PR
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && steps.check.outputs.fail_count != '0'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const core = require('@actions/core'); // ⛔ to trigger job failure
-
             const results = JSON.parse(fs.readFileSync('kyverno-results.json', 'utf8'));
             const violations = results.results?.filter(r => r.result === "fail") || [];
 
-            if (violations.length > 0) {
-              let table = '| 🔒 Severity | 📄 Resource | 📂 Namespace | 🧾 Policy | 📍 Rule | 📜 Message |\n';
-              table += '|------------|-------------|--------------|-----------|--------|------------|\n';
+            // Sort by severity: 🔴 → 🟠 → 🟢
+            const sorted = violations.sort((a, b) => {
+              const score = (v) => {
+                if ((v.policy || '').includes('security') || (v.rule || '').includes('privilege')) return 1;
+                if ((v.policy || '').includes('label') || (v.rule || '').includes('label')) return 3;
+                return 2;
+              };
+              return score(a) - score(b);
+            });
 
-              for (const v of violations) {
-                const resource = `${v.resources?.[0]?.kind || ''} ${v.resources?.[0]?.name || ''}`;
-                const ns = v.resources?.[0]?.namespace || '';
-                let severity = '🟠';
-                if ((v.rule || '').includes('privilege') || (v.policy || '').includes('security')) {
-                  severity = '🔴';
-                } else if ((v.policy || '').includes('label') || (v.rule || '').includes('label')) {
-                  severity = '🟢';
-                }
+            let body = `🚨 **${sorted.length} Kyverno Policy Violation${sorted.length > 1 ? 's' : ''}**\n\n`;
 
-                const message = v.message.length > 100
-                  ? `<details><summary>View</summary>${v.message}</details>`
-                  : v.message;
-                table += `| ${severity} | ${resource} | ${ns} | ${v.policy} | ${v.rule} | ${message} |\n`;
+            for (const v of sorted) {
+              const kind = v.resources?.[0]?.kind || '';
+              const name = v.resources?.[0]?.name || '';
+              const ns = v.resources?.[0]?.namespace || '';
+              const policy = v.policy;
+              const rule = v.rule;
+              const message = v.message;
+
+              let severity = '🟠';
+              if (policy.includes('security') || rule.includes('privilege')) {
+                severity = '🔴';
+              } else if (policy.includes('label') || rule.includes('label')) {
+                severity = '🟢';
               }
 
-              let body = `🚨 **${violations.length} Kyverno Policy Violation${violations.length > 1 ? 's' : ''}**\n\n`;
-              body += `<details>\n<summary>🚨 ${violations.length} Kyverno Violations</summary>\n\n${table}\n</details>`;
+              body += `${severity} ${kind} "${name}" in namespace "${ns}"\n`;
+              body += `• Policy: ${policy}\n`;
+              body += `• Rule: ${rule}\n`;
+              body += `• Message: ${message}\n\n`;
+            }
 
-              // Leave a comment on PR
-              github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body
-              });
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
 
               // 🔥 Fail the job intentionally
               core.setFailed(`${violations.length} Kyverno violation(s) detected`);
