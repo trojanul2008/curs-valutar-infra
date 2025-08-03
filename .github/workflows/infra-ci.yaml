@@ -172,7 +172,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: kyverno-result
+          name: kyverno-result-${{ matrix.overlay }}
           path: kyverno-results.json
 
 
