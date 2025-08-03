@@ -60,17 +60,20 @@ jobs:
     name: 🚨 Kyverno Policy Check
     runs-on: ubuntu-latest
     needs: schema
+    strategy:
+      matrix:
+        overlay: [dev, prod]
     steps:
       - uses: actions/checkout@v4
       - name: Install tools
         run: bash scripts/install/install-all.sh
       - name: Apply Kyverno and generate report
         run: |
-          echo "🔍 Building Kubernetes base manifest..."
-          kustomize build infrastructure/k8s/base > base.yaml
+          echo "🔍 Building Kubernetes manifest for ${{ matrix.overlay }}..."
+          kustomize build infrastructure/k8s/overlays/${{ matrix.overlay }} > manifest.yaml
           echo "🚨 Running Kyverno policy checks..."
           kyverno apply infrastructure/kyverno \
-            --resource base.yaml \
+            --resource manifest.yaml \
             --policy-report | tee kyverno-raw.txt
           echo "📄 Extracting PolicyReport YAML..."
           awk '/^apiVersion:/,0' kyverno-raw.txt > kyverno-policyreport.yaml
@@ -84,21 +87,15 @@ jobs:
           jq '.summary.fail' kyverno-results.json
       - name: Show failed Kyverno policies in console and exit if any
         run: |-
-          # ────────────────────────────────────────────────────────────────
           # 1.  Count failed results
-          # ────────────────────────────────────────────────────────────────
           FAIL_COUNT=$(jq '.summary.fail' kyverno-results.json)
-
           if [ "$FAIL_COUNT" -gt 0 ]; then
             echo "🚨 Kyverno found $FAIL_COUNT policy violation(s)!"
             echo "🧾 Listing sorted violations by severity..."
-
-            # ──────────────────────────────────────────────────────────────
             # 2.  Build a severity-sorted, compact list of failed results
             #     🔴 (security / privilege)  → sort key 1
             #     🟠 (everything else)       → sort key 2
             #     🟢 (labelling)             → sort key 3
-            # ──────────────────────────────────────────────────────────────
             jq -c '
               .results
               | map(select(.result == "fail"))
@@ -114,12 +111,8 @@ jobs:
                 )
               | .[]
             ' kyverno-results.json > kyverno-violations.json
-
-            # ──────────────────────────────────────────────────────────────
             # 3.  Pretty-print each violation + build GitHub comment body
-            # ──────────────────────────────────────────────────────────────
             COMMENT_BODY="🚨 **Kyverno Policy Violations**\n\n"
-
             while IFS= read -r violation; do
               POLICY=$(echo "$violation"   | jq -r '.policy')
               RESOURCE_KIND=$(echo "$violation" | jq -r '.resources[0].kind')
@@ -127,51 +120,38 @@ jobs:
               RESOURCE_NS=$(echo "$violation"   | jq -r '.resources[0].namespace')
               RULE=$(echo "$violation"     | jq -r '.rule')
               MESSAGE=$(echo "$violation"  | jq -r '.message')
-
               # Pick the emoji severity we already encoded in sort-by
               SEVERITY="🟠"
               [[ "$RULE"   == *"privilege"* || "$POLICY" == *"security"* ]] && SEVERITY="🔴"
               [[ "$RULE"   == *"label"*     || "$POLICY" == *"label"*    ]] && SEVERITY="🟢"
-
               echo ""
               echo "$SEVERITY $RESOURCE_KIND \"$RESOURCE_NAME\" in namespace \"$RESOURCE_NS\""
               echo "    ├─ Policy: $POLICY"
               echo "    ├─ Rule:   $RULE"
               echo "    └─ Message:$MESSAGE"
-
               COMMENT_BODY+="$SEVERITY $RESOURCE_KIND \"$RESOURCE_NAME\" in namespace \"$RESOURCE_NS\"\n"
               COMMENT_BODY+="• Policy: $POLICY\n"
               COMMENT_BODY+="• Rule:   $RULE\n"
               COMMENT_BODY+="• Message:$MESSAGE\n\n"
-
-              # ────────────────────────────────────────────────────────────
               # 4.  Try to locate the resource in repo manifests
-              # ────────────────────────────────────────────────────────────
               echo ""
               echo "🔎 Searching for resource in manifests..."
               MATCHED_FILE=$(grep -rli -- "$RESOURCE_NAME" infrastructure/ | grep -E '\.ya?ml$' | head -n 1)
-
               if [ -n "$MATCHED_FILE" ]; then
                 echo "📁 Found in: $MATCHED_FILE"
-
                 echo "🔍 Labels via yq:"
                 yq eval-all 'select(.kind == "'"$RESOURCE_KIND"'" and .metadata.name == "'"$RESOURCE_NAME"'") | .metadata.labels' "$MATCHED_FILE" \
                   || echo "⚠️  Labels not found."
-
                 echo "📝 Annotations:"
                 yq eval-all 'select(.kind == "'"$RESOURCE_KIND"'" and .metadata.name == "'"$RESOURCE_NAME"'") | .metadata.annotations' "$MATCHED_FILE" \
                   || echo "⚠️  Annotations not found."
-
                 echo "📦 Full Resource Block:"
                 yq eval-all 'select(.kind == "'"$RESOURCE_KIND"'" and .metadata.name == "'"$RESOURCE_NAME"'")' "$MATCHED_FILE" \
                   || echo "⚠️  Could not extract full block."
               else
                 echo "❓ File not found in expected paths."
               fi
-
-              # ────────────────────────────────────────────────────────────
               # 5.  Optional live-cluster fallback
-              # ────────────────────────────────────────────────────────────
               echo "🌐 Fallback: Live resource via kubectl..."
               if kubectl config current-context &>/dev/null; then
                 kubectl get "$RESOURCE_KIND" "$RESOURCE_NAME" -n "$RESOURCE_NS" -o json 2>/dev/null \
@@ -180,16 +160,21 @@ jobs:
               else
                 echo "🚫 Skipping kubectl fallback: No kube context available."
               fi
-
               echo ""
             done < kyverno-violations.json
-
             echo "🧮 Summary: $FAIL_COUNT violation(s) flagged."
             echo -e "$COMMENT_BODY" > kyverno-github-comment.md
             exit 1
           else
             echo "✅ No policy violations detected."
           fi
+      - name: Upload Kyverno result for PR comment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kyverno-result
+          path: kyverno-results.json
+
 
   post-comment:
     name: 💬 Kyverno Violation Comment
@@ -199,19 +184,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - name: Download Kyverno result
         uses: actions/download-artifact@v4
         with:
           name: kyverno-result
-
       - name: Check Kyverno failure count
         id: check
         run: |
           FAIL_COUNT=$(jq '.summary.fail' kyverno-results.json)
           echo "🔍 Detected Kyverno violations: $FAIL_COUNT"
           echo "fail_count=$FAIL_COUNT" >> $GITHUB_OUTPUT
-
       - name: Comment on PR
         if: github.event_name == 'pull_request' && steps.check.outputs.fail_count != '0'
         uses: actions/github-script@v7
@@ -220,7 +202,6 @@ jobs:
             const fs = require('fs');
             const results = JSON.parse(fs.readFileSync('kyverno-results.json', 'utf8'));
             const violations = results.results?.filter(r => r.result === "fail") || [];
-
             // Sort by severity: 🔴 → 🟠 → 🟢
             const sorted = violations.sort((a, b) => {
               const score = (v) => {
@@ -230,9 +211,7 @@ jobs:
               };
               return score(a) - score(b);
             });
-
             let body = `🚨 **${sorted.length} Kyverno Policy Violation${sorted.length > 1 ? 's' : ''}**\n\n`;
-
             for (const v of sorted) {
               const kind = v.resources?.[0]?.kind || '';
               const name = v.resources?.[0]?.name || '';
@@ -240,33 +219,28 @@ jobs:
               const policy = v.policy;
               const rule = v.rule;
               const message = v.message;
-
               let severity = '🟠';
               if (policy.includes('security') || rule.includes('privilege')) {
                 severity = '🔴';
               } else if (policy.includes('label') || rule.includes('label')) {
                 severity = '🟢';
               }
-
               body += `${severity} ${kind} "${name}" in namespace "${ns}"\n`;
               body += `• Policy: ${policy}\n`;
               body += `• Rule: ${rule}\n`;
               body += `• Message: ${message}\n\n`;
             }
-
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
               body
             });
-
               // 🔥 Fail the job intentionally
               core.setFailed(`${violations.length} Kyverno violation(s) detected`);
             } else {
               console.log("✅ No violations detected.");
             }
-
       - name: Upload Kyverno result summary
         if: steps.check.outputs.fail_count == '0'
         uses: actions/upload-artifact@v4

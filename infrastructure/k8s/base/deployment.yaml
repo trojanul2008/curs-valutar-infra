@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: curs-valutar
   namespace: dev
-# NOTE: Namespace and labels are overridden by overlays
+  # NOTE: Namespace and labels are overridden by overlays
   labels:
     team: devops
     app: curs-valutar
