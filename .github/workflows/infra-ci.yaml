@@ -198,7 +198,7 @@ jobs:
           echo "🔍 Detected Kyverno violations: $FAIL_COUNT"
           echo "fail_count=$FAIL_COUNT" >> $GITHUB_OUTPUT
       - name: Comment on PR
-        if: github.event_name == 'pull_request' && steps.check.outputs.fail_count != '0'
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
@@ -248,7 +248,7 @@ jobs:
         if: steps.check.outputs.fail_count == '0'
         uses: actions/upload-artifact@v4
         with:
-          name: kyverno-summary
+          name: kyverno-summary-${{ matrix.overlay }}
           path: kyverno-results.json
 
   scan:
