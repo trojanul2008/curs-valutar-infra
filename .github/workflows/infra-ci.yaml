@@ -198,7 +198,7 @@ jobs:
           echo "🔍 Detected Kyverno violations: $FAIL_COUNT"
           echo "fail_count=$FAIL_COUNT" >> $GITHUB_OUTPUT
       - name: Comment on PR
-        if: github.event_name == 'pull_request'
+        if: always()
         uses: actions/github-script@v7
         with:
           script: |
@@ -271,6 +271,9 @@ jobs:
           chmod +x scripts/utils/scan-images.sh
           TRIVY_CACHE_DIR="${TRIVY_CACHE_DIR}" scripts/utils/scan-images.sh > trivy-report.txt
           grep 'CRITICAL\|HIGH' trivy-report.txt > trivy-summary.txt || true
+      - name: Display vulnerability summary
+        if: failure()
+        run: cat vulnerability-details.txt || echo "No vulnerabilities found or file missing"
       - name: Upload Trivy reports
         uses: actions/upload-artifact@v4
         with:
@@ -278,13 +281,15 @@ jobs:
           path: |
             trivy-report.txt
             trivy-summary.txt
+            vulnerability-details.txt
       - name: GitHub comment on Trivy summary
-        if: github.event_name == 'pull_request'
+        if: always()
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
             const summary = fs.readFileSync('trivy-summary.txt', 'utf8').slice(0, 6000);
+            #summary.length > 6000 ? summary.slice(0, 6000) + '\n...truncated' : summary
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
@@ -320,7 +325,7 @@ jobs:
           name: 📊-drift-${{ matrix.env }}
           path: drift-${{ matrix.env }}.txt
       - name: GitHub comment on drift
-        if: github.event_name == 'pull_request'
+        if: always()
         uses: actions/github-script@v7
         env:
           MATRIX_ENV: ${{ matrix.env }}
