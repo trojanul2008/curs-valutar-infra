@@ -2,7 +2,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: curs-valutar
+  namespace: dev
+# NOTE: Namespace and labels are overridden by overlays
   labels:
+    team: devops
     app: curs-valutar
     env: production
     version: v1.0
