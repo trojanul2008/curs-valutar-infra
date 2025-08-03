@@ -360,38 +360,48 @@ jobs:
         env: [dev, prod]
     env:
       HELM_PLUGIN_DIR: ~/.local/share/helm/plugins
+      KUBECTL_CONTEXT: remote-cloudflare  # you can override per env if needed
     steps:
-      # 1️⃣ Checkout
+      # 1️⃣ Checkout code
       - uses: actions/checkout@v4
-      # 2️⃣ Install Flux
+      # 2️⃣ Install Flux CLI
       - name: Install Flux
         run: curl -s https://fluxcd.io/install.sh | sudo bash
-      # 3️⃣ Prepare Helm plugin cache
+      # 3️⃣ Create plugin directory
       - name: Prepare Helm plugin cache
-        run: mkdir -p ${{ env.HELM_PLUGIN_DIR }}
+        run: mkdir -p "${{ env.HELM_PLUGIN_DIR }}"
       # 4️⃣ Cache Helm plugins
       - name: Cache Helm plugins
         uses: actions/cache@v3
         with:
           path: ${{ env.HELM_PLUGIN_DIR }}
           key: helm-plugins-${{ matrix.env }}-${{ hashFiles('scripts/install/install-helm.sh') }}
-      # 5️⃣ Pre-check: List kubectl contexts for debug
-      - name: Debug kubectl contexts
+      # 5️⃣ Debug: Show available kube contexts
+      - name: Debug available kube contexts
         run: kubectl config get-contexts || echo "⚠️ No kubeconfig available"
-      # 6️⃣ Detect drift
+      # 6️⃣ Detect drift (fail if context is missing or Flux fails)
       - name: Detect drift in ${{ matrix.env }}
+        shell: bash
         run: |
-          flux --context="${{ env.KUBECTL_CONTEXT }}" diff kustomization curs-valutar-${{ matrix.env }} \
-            --path infrastructure/k8s/overlays/${{ matrix.env }} > drift-${{ matrix.env }}.txt || echo "⚠️ Context not found"
+          echo "🔍 Detecting drift for '${{ matrix.env }}' using context '${{ env.KUBECTL_CONTEXT }}'"
+          if ! flux --context="${{ env.KUBECTL_CONTEXT }}" diff kustomization curs-valutar-${{ matrix.env }} \
+            --path infrastructure/k8s/overlays/${{ matrix.env }} > drift-${{ matrix.env }}.txt; then
+            echo "❌ Drift detection failed: Flux or context '${{ env.KUBECTL_CONTEXT }}' not available"
+            exit 1
+          fi
+          # Ensure file is never empty to avoid later failures
+          if [ ! -s drift-${{ matrix.env }}.txt ]; then
+            echo "⚠️ No drift detected or output empty." > drift-${{ matrix.env }}.txt
+          fi
       # 7️⃣ Upload drift report
       - name: Upload drift report
         uses: actions/upload-artifact@v4
         with:
-          name: drift-${{ matrix.env }}
+          name: drift-report-${{ matrix.env }}
           path: drift-${{ matrix.env }}.txt
-      # 8️⃣ GitHub PR comment (only if running in a PR)
-      - name: GitHub comment on drift
-        if: always()
+      # 8️⃣ Comment on PR with drift results
+      - name: GitHub PR comment — drift summary
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         env:
           MATRIX_ENV: ${{ matrix.env }}
@@ -416,5 +426,5 @@ jobs:
                 console.log('ℹ️ No pull-request context — skipping comment.');
               }
             } catch (err) {
-              console.error(`❌ Failed to read ${reportFile}:`, err);
+              console.error(`❌ Failed to read ${reportFile}:`, err.message);
             }
