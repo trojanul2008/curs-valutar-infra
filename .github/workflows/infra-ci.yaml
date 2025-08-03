@@ -352,32 +352,44 @@ jobs:
             }
 
   drift:
-    name: 📊 Drift Detection via Flux
+    name: Drift Detection via Flux
     runs-on: ubuntu-latest
     needs: scan
     strategy:
       matrix:
         env: [dev, prod]
+    env:
+      HELM_PLUGIN_DIR: ~/.local/share/helm/plugins
     steps:
+      # 1️⃣ Checkout
       - uses: actions/checkout@v4
+      # 2️⃣ Install Flux
       - name: Install Flux
         run: curl -s https://fluxcd.io/install.sh | sudo bash
+      # 3️⃣ Prepare Helm plugin cache
       - name: Prepare Helm plugin cache
         run: mkdir -p ${{ env.HELM_PLUGIN_DIR }}
+      # 4️⃣ Cache Helm plugins
       - name: Cache Helm plugins
         uses: actions/cache@v3
         with:
           path: ${{ env.HELM_PLUGIN_DIR }}
           key: helm-plugins-${{ matrix.env }}-${{ hashFiles('scripts/install/install-helm.sh') }}
+      # 5️⃣ Pre-check: List kubectl contexts for debug
+      - name: Debug kubectl contexts
+        run: kubectl config get-contexts || echo "⚠️ No kubeconfig available"
+      # 6️⃣ Detect drift
       - name: Detect drift in ${{ matrix.env }}
         run: |
-          flux --context=${{ env.KUBECTL_CONTEXT }} diff kustomization curs-valutar-${{ matrix.env }} \
-            --path infrastructure/k8s/overlays/${{ matrix.env }} > drift-${{ matrix.env }}.txt || true
+          flux --context="${{ env.KUBECTL_CONTEXT }}" diff kustomization curs-valutar-${{ matrix.env }} \
+            --path infrastructure/k8s/overlays/${{ matrix.env }} > drift-${{ matrix.env }}.txt || echo "⚠️ Context not found"
+      # 7️⃣ Upload drift report
       - name: Upload drift report
         uses: actions/upload-artifact@v4
         with:
-          name: 📊-drift-${{ matrix.env }}
+          name: drift-${{ matrix.env }}
           path: drift-${{ matrix.env }}.txt
+      # 8️⃣ GitHub PR comment (only if running in a PR)
       - name: GitHub comment on drift
         if: always()
         uses: actions/github-script@v7
@@ -386,10 +398,23 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const report = fs.readFileSync('drift-${{ matrix.env }}.txt', 'utf8').slice(0, 6000);
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `📊 **Flux Drift Report (${process.env.MATRIX_ENV})**\n\n\`\`\`\n${report}\n\`\`\``
-            })
+            const reportFile = `drift-${process.env.MATRIX_ENV}.txt`;
+            let body = `📊 **Flux Drift Report (\`${process.env.MATRIX_ENV}\`)**\n`;
+            try {
+              const content = fs.readFileSync(reportFile, 'utf8').trim();
+              const report = content.length === 0 ? '⚠️ No drift report available.' : content.slice(0, 6000);
+              body += `\n\`\`\`\n${report}\n\`\`\``;
+              const prNumber = context.payload.pull_request?.number;
+              if (prNumber) {
+                github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  body
+                });
+              } else {
+                console.log('ℹ️ No pull-request context — skipping comment.');
+              }
+            } catch (err) {
+              console.error(`❌ Failed to read ${reportFile}:`, err);
+            }
