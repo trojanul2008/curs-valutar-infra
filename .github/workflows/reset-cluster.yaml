@@ -23,6 +23,18 @@ jobs:
             exit 1
           fi
           echo "✅ Confirmed wipe of namespace '${{ inputs.namespace }}'"
+      - name: Restore kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > ~/.kube/config
+          kubectl config use-context remote-cloudflare
+          echo "🔑 Kubeconfig restored and context set."
+      - name: Sanity check cluster connection
+        run: |
+          echo "🧠 Checking current context and cluster connectivity…"
+          kubectl config current-context
+          kubectl get ns
+          echo "✅ Cluster access verified."
       - name: Wipe namespace and related resources
         run: |
           set -euo pipefail
