@@ -368,7 +368,7 @@ jobs:
       - name: Inject kubeconfig from secret
         run: |
           mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG_BASE64 }}" | base64 -d > ~/.kube/config
+          echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > ~/.kube/config
       # Verify the config was decoded and saved correctly
       - name: Show kubeconfig file
         run: cat ~/.kube/config | head -n 10
