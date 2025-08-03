@@ -298,12 +298,16 @@ jobs:
             } catch (err) {
               summary = '⚠️ Trivy summary file missing or unreadable.';
             }
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `🛡️ **Trivy Vulnerability Summary**\n\n\`\`\`\n${summary}\n\`\`\``
-            });
+            if (context.issue?.number) {
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `🛡️ **Trivy Vulnerability Summary**\n\n\`\`\`\n${summary}\n\`\`\``
+              });
+            } else {
+              console.log("ℹ️ No issue number found — skipping comment.");
+            }
 
   drift:
     name: 📊 Drift Detection via Flux
