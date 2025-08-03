@@ -1,4 +1,4 @@
-name: Reset Cluster
+name: ⚠️  Reset Cluster
 
 on:
   workflow_dispatch:
@@ -51,8 +51,17 @@ jobs:
             }
             echo "  …still terminating"
           done
-          echo "⚠️ Namespace stuck in Terminating — removing finalizers"
-          kubectl get ns "${NAMESPACE}" -o json \
+          echo "⚠️ Namespace stuck in Terminating — inspecting finalizers"
+          RAW_NS_JSON=$(kubectl get ns "${NAMESPACE}" -o json || echo "")
+          if [[ -z "${RAW_NS_JSON}" ]]; then
+            echo "❌ Unable to retrieve namespace JSON. Skipping finalizer removal."
+            exit 1
+          fi
+          echo "🔬 Raw namespace JSON:"
+          echo "${RAW_NS_JSON}" | jq .
+
+          echo "🔧 Removing finalizers..."
+          echo "${RAW_NS_JSON}" \
             | jq 'del(.spec.finalizers)' \
             | kubectl replace --raw "/api/v1/namespaces/${NAMESPACE}/finalize" -f -
           echo "🗑️ Namespace '${NAMESPACE}' forced-deleted."
