@@ -1,0 +1,95 @@
+name: ⚠️ Reset Cluster
+on:
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: 'Namespace to wipe'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+      confirm_prod_wipe:
+        description: 'TYPE YES TO NUKE PROD (ignored for dev)'
+        required: false
+      label_based_wipe:
+        description: 'Use label-based deletion instead of full namespace removal? (true/false)'
+        required: false
+concurrency:
+  group: reset-cluster-${{ github.ref }}
+  cancel-in-progress: false
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  reset:
+    name: Reset ${{ inputs.target_env }} environment
+    runs-on: ubuntu-latest
+    env:
+      NAMESPACE: ${{ inputs.target_env }}
+    steps:
+      # 1️⃣ Check out repo
+      - uses: actions/checkout@v4
+      # 2️⃣ Restore kubeconfig
+      - name: Configure kube-context
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > ~/.kube/config
+          kubectl config use-context remote-cloudflare
+      # 3️⃣ Ping cluster to confirm access
+      - name: Verify cluster connection
+        run: kubectl get nodes --context=remote-cloudflare
+      # 4️⃣ Load versions from versions.yaml
+      - name: Load tool versions
+        id: versions
+        run: |
+          VERS_FILE=".github/versions.yaml"
+          echo "kubectl=$(yq '.kubectl' $VERS_FILE)" >> $GITHUB_OUTPUT
+          echo "flux=$(yq '.flux' $VERS_FILE)" >> $GITHUB_OUTPUT
+          echo "helm=$(yq '.helm' $VERS_FILE)" >> $GITHUB_OUTPUT
+      # 5️⃣ Install tools
+      - name: Install CLI tools
+        uses: ./.github/workflows/tool-install.yaml
+        with:
+          KUBECTL_VERSION: ${{ steps.versions.outputs.kubectl }}
+          FLUX_VERSION: ${{ steps.versions.outputs.flux }}
+          HELM_VERSION: ${{ steps.versions.outputs.helm }}
+      # 6️⃣ Production safety gate
+      - name: Confirm prod wipe
+        if: ${{ inputs.target_env == 'prod' }}
+        run: |
+          if [[ "${{ inputs.confirm_prod_wipe }}" != "YES" ]]; then
+            echo "🚫 Refusing to wipe production without confirmation"
+            exit 1
+          fi
+      # 7️⃣ Wipe logic (choose full vs label-based)
+      - name: Wipe namespace clean
+        run: |
+          echo "🔄 Starting wipe of namespace '${NAMESPACE}'"
+          if [[ "${{ inputs.label_based_wipe }}" == "true" ]]; then
+            echo "🚿 Using label-based deletion with label 'app=curs-valutar'"
+            for kind in $(kubectl api-resources --namespaced=true --verbs=list -o name); do
+              kubectl delete "$kind" -n "${NAMESPACE}" -l app=curs-valutar --ignore-not-found=true --wait
+            done
+          else
+            echo "🧨 Deleting full namespace '${NAMESPACE}'"
+            kubectl delete ns "${NAMESPACE}" --ignore-not-found=true --wait
+            echo "🔧 Recreating namespace '${NAMESPACE}'"
+            kubectl create ns "${NAMESPACE}"
+          fi
+      # 8️⃣ (Optional) Flux resync
+      - name: Flux reconcile
+        if: always()
+        run: |
+          flux reconcile kustomization "${NAMESPACE}" --with-source --context=remote-cloudflare || echo "⚠️ Flux sync failed (likely no kustomization yet)"
+      # 9️⃣ (Optional) Slack notification
+      # - name: Notify Slack
+      #   if: success()
+      #   uses: slackapi/slack-github-action@v1.24.0
+      #   with:
+      #     payload: |
+      #       {
+      #         "text": "✅ Reset completed for *${{ inputs.target_env }}* by *${{ github.actor }}*"
+      #       }
+      #   env:
+      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

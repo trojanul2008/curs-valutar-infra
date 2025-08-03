@@ -1,0 +1,51 @@
+name: 🚀 Bootstrap Infrastructure
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bootstrap:
+    name: Bootstrap GitOps stack
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Restore kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 --decode > ~/.kube/config
+          kubectl config use-context remote-cloudflare
+
+      - name: Verify remote cluster access
+        run: kubectl --context=remote-cloudflare get nodes
+
+      - name: Install dependencies
+        uses: ./.github/workflows/tool-install.yaml
+
+      - name: Create required namespaces
+        run: |
+          kubectl create ns dev --context=remote-cloudflare || true
+          kubectl create ns prod --context=remote-cloudflare || true
+
+      - name: Install Kyverno
+        run: |
+          kubectl --context=remote-cloudflare create ns kyverno || true
+          kubectl --context=remote-cloudflare apply -f \
+            https://raw.githubusercontent.com/kyverno/kyverno/main/config/release/install.yaml
+
+      - name: Flux Bootstrap
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          flux bootstrap github \
+            --context=remote-cloudflare \
+            --owner=trojanul2008 \
+            --repository=curs-valutar-infra \
+            --branch=dev \
+            --path=infrastructure/flux/flux-system/manifests \
+            --personal
+
+      - name: Verify Flux reconciliation
+        run: flux get kustomizations --context=remote-cloudflare

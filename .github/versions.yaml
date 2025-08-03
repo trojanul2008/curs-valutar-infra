@@ -1,0 +1,11 @@
+kubectl: v1.29.2
+flux: v2.6.4
+helm: 3.13.3
+KUSTOMIZE_VERSION: v5.0.2
+KUBECONFORM_VERSION: v0.6.7
+KYVERNO_VERSION: v1.12.4
+YQ_VERSION: v4.43.1
+TRIVY_VERSION: 0.50.1
+TRIVY_CACHE_DIR: /tmp/trivy-cache
+HELM_PLUGIN_DIR: ~/.local/share/helm/plugins
+KUBECTL_CONTEXT: remote-cloudflare
