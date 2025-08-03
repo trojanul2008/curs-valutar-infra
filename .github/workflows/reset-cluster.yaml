@@ -44,16 +44,16 @@ jobs:
         id: versions
         run: |
           VERS_FILE=".github/versions.yaml"
-          echo "kubectl=$(yq '.kubectl' $VERS_FILE)" >> $GITHUB_OUTPUT
-          echo "flux=$(yq '.flux' $VERS_FILE)" >> $GITHUB_OUTPUT
-          echo "helm=$(yq '.helm' $VERS_FILE)" >> $GITHUB_OUTPUT
-      # 5️⃣ Install tools
+          echo "kubectl=$(yq '.kubectl' "$VERS_FILE")" >> "$GITHUB_OUTPUT"
+          echo "flux=$(yq '.flux' "$VERS_FILE")" >> "$GITHUB_OUTPUT"
+          echo "helm=$(yq '.helm' "$VERS_FILE")" >> "$GITHUB_OUTPUT"
+      # 5️⃣ Install tools — FIXED PATH
       - name: Install CLI tools
-        uses: ./.github/workflows/tool-install.yaml
+        uses: ./.github/actions/tool-install
         with:
-          KUBECTL_VERSION: ${{ steps.versions.outputs.kubectl }}
-          FLUX_VERSION: ${{ steps.versions.outputs.flux }}
-          HELM_VERSION: ${{ steps.versions.outputs.helm }}
+          kubectl: ${{ steps.versions.outputs.kubectl }}
+          flux: ${{ steps.versions.outputs.flux }}
+          helm: ${{ steps.versions.outputs.helm }}
       # 6️⃣ Production safety gate
       - name: Confirm prod wipe
         if: ${{ inputs.target_env == 'prod' }}
@@ -77,7 +77,7 @@ jobs:
             echo "🔧 Recreating namespace '${NAMESPACE}'"
             kubectl create ns "${NAMESPACE}"
           fi
-      # 8️⃣ (Optional) Flux resync
+      # 8️⃣ Optional: flux sync
       - name: Flux reconcile
         if: always()
         run: |
