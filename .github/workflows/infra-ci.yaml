@@ -179,6 +179,9 @@ jobs:
   post-comment:
     name: 💬 Kyverno Violation Comment
     needs: policy
+    strategy:
+      matrix:
+        overlay: [dev, prod]
     if: needs.policy.result == 'success'
     runs-on: ubuntu-latest
 
@@ -187,7 +190,7 @@ jobs:
       - name: Download Kyverno result
         uses: actions/download-artifact@v4
         with:
-          name: kyverno-result
+          name: kyverno-result-${{ matrix.overlay }}
       - name: Check Kyverno failure count
         id: check
         run: |
