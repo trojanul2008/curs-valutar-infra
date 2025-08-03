@@ -253,68 +253,105 @@ jobs:
           path: kyverno-results.json
 
   scan:
-    name: 🛡️ Container Image Scan
+    name: "🛡️ Container Image Scan"
     runs-on: ubuntu-latest
     needs: policy
+    # Put the cache dir in one place for every step
+    env:
+      TRIVY_CACHE_DIR: /tmp/trivy-cache
     steps:
+      # 1️⃣  Source
       - uses: actions/checkout@v4
-      - name: Install tools
+      # 2️⃣  Toolchain bootstrap
+      - name: Install helper tools (Trivy, yq, Helm, Kyverno…)
         run: bash scripts/install/install-all.sh
+      # 3️⃣  Cache directory
       - name: Prepare Trivy cache directory
-        run: mkdir -p "${TRIVY_CACHE_DIR}"
+        run: mkdir -p "$TRIVY_CACHE_DIR"
+      # 4️⃣  Cache Trivy DB between runs
       - name: Cache Trivy DB
         uses: actions/cache@v3
         with:
           path: ${{ env.TRIVY_CACHE_DIR }}
           key: trivy-db-${{ hashFiles('scripts/utils/scan-images.sh') }}
+      # 5️⃣  Run the actual scan
       - name: Run Trivy scan
+        id: trivy
+        shell: bash
         run: |
           chmod +x scripts/utils/scan-images.sh
-          TRIVY_CACHE_DIR="${TRIVY_CACHE_DIR}" scripts/utils/scan-images.sh > trivy-report.txt || true
-          grep 'CRITICAL\|HIGH' trivy-report.txt > trivy-summary.txt || true
-          awk '/Image:/ {img=$0} /CRITICAL|HIGH/ {print img "\n" $0 "\n"}' trivy-report.txt >> trivy-summary.txt || true
+          # Full verbose report (script prints plenty of context)
+          TRIVY_CACHE_DIR="$TRIVY_CACHE_DIR" scripts/utils/scan-images.sh > trivy-report.txt || true
+          # Condensed summary: image header + every HIGH/CRITICAL line
+          awk '
+            /Image:/        { img = $0 }
+            /CRITICAL|HIGH/ { print img "\n" $0 "\n" }
+          ' trivy-report.txt > trivy-summary.txt || true
+      # 6️⃣  Fail the job if any HIGH/CRITICAL found
       - name: Fail on vulnerabilities
-        if: always()
+        if: always()          # ensure this still runs after previous step
         run: |
-          if grep -q 'CRITICAL\|HIGH' trivy-report.txt; then
+          if grep -qE 'CRITICAL|HIGH' trivy-report.txt; then
             echo "🚨 Vulnerabilities found"
             exit 1
           fi
+      # 7️⃣  Quick console echo on failure
       - name: Display vulnerability summary
         if: failure()
         run: cat vulnerability-details.txt || echo "No vulnerabilities found or file missing"
+      # 8️⃣  Upload artefacts for post-mortem
       - name: Upload Trivy reports
         uses: actions/upload-artifact@v4
         with:
-          name: 🛡️-trivy-scan
+          name: "🛡️-trivy-scan"
           path: |
             trivy-report.txt
             trivy-summary.txt
             vulnerability-details.txt
-      - name: GitHub comment on Trivy summary
-        if: always()
+      # 9️⃣  Comment on the PR with a richer Markdown digest
+      - name: GitHub PR comment — Trivy summary
+        if: always()          # still runs on success/failure
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            let summary = '';
-            try {
-              summary = fs.readFileSync('trivy-summary.txt', 'utf8');
-              if (summary.length > 6000) {
-                summary = summary.slice(0, 6000) + '\n...truncated';
-              }
-            } catch (err) {
-              summary = '⚠️ Trivy summary file missing or unreadable.';
+            /* ---------- helpers ---------- */
+            const sevEmoji = (lvl) => lvl === 'CRITICAL' ? '🔴' : '🟠';
+            /* ---------- read the condensed summary ---------- */
+            let raw = '';
+            try { raw = fs.readFileSync('trivy-summary.txt','utf8'); }
+            catch { raw = ''; }
+            if (!raw.trim()) {
+              console.log('No summary file — nothing to comment.');
+              return;
             }
-            if (context.issue?.number) {
+            /* ---------- build a tidy Markdown body ---------- */
+            let body = '🛡️ **Trivy Vulnerability Summary**\n';
+            let currentImage = null;
+            raw.split('\n').forEach(line => {
+              if (line.startsWith('Image:')) {
+                currentImage = line.replace('Image:', '').trim();
+                body += `\n### 📦 \`${currentImage}\`\n`;
+              } else if (/CRITICAL|HIGH/.test(line)) {
+                const sev = line.includes('CRITICAL') ? 'CRITICAL' : 'HIGH';
+                const cveMatch = line.match(/CVE-\d{4}-\d{4,7}/);
+                const cve = cveMatch ? `[${cveMatch[0]}](https://nvd.nist.gov/vuln/detail/${cveMatch[0]})` : 'Unknown-CVE';
+                body += `- ${sevEmoji(sev)} **${sev}** — ${cve}\n`;
+              }
+            });
+            /* ---------- enforce 6k char GitHub limit ---------- */
+            if (body.length > 6000) body = body.slice(0, 6000) + '\n...truncated';
+            /* ---------- post the comment if we’re on a PR ---------- */
+            const prNumber = context.payload.pull_request?.number;
+            if (prNumber) {
               github.rest.issues.createComment({
-                issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: `🛡️ **Trivy Vulnerability Summary**\n\n\`\`\`\n${summary}\n\`\`\``
+                issue_number: prNumber,
+                body
               });
             } else {
-              console.log("ℹ️ No issue number found — skipping comment.");
+              console.log('ℹ️ No pull-request context — skipping comment.');
             }
 
   drift:
