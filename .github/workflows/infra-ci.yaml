@@ -233,12 +233,13 @@ jobs:
               body += `• Rule: ${rule}\n`;
               body += `• Message: ${message}\n\n`;
             }
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body
-            });
+            if (violations.length > 0) {
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body
+              });
               // 🔥 Fail the job intentionally
               core.setFailed(`${violations.length} Kyverno violation(s) detected`);
             } else {
@@ -288,8 +289,15 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const summary = fs.readFileSync('trivy-summary.txt', 'utf8').slice(0, 6000);
-            #summary.length > 6000 ? summary.slice(0, 6000) + '\n...truncated' : summary
+            let summary = '';
+            try {
+              summary = fs.readFileSync('trivy-summary.txt', 'utf8');
+              if (summary.length > 6000) {
+                summary = summary.slice(0, 6000) + '\n...truncated';
+              }
+            } catch (err) {
+              summary = '⚠️ Trivy summary file missing or unreadable.';
+            }
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
