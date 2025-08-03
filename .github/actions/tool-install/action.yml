@@ -1,0 +1,23 @@
+name: "Install CLI Tools"
+description: "Installs kubectl, flux, and helm using provided versions"
+inputs:
+  kubectl:
+    description: "Kubectl version"
+    required: true
+  flux:
+    description: "Flux version"
+    required: true
+  helm:
+    description: "Helm version"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Run installer script
+      shell: bash
+      run: |
+        chmod +x ${{ github.action_path }}/install-tools.sh
+        ${{ github.action_path }}/install-tools.sh \
+          "${{ inputs.kubectl }}" \
+          "${{ inputs.flux }}" \
+          "${{ inputs.helm }}"
