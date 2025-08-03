@@ -63,19 +63,27 @@ jobs:
             exit 1
           fi
       # 7️⃣ Wipe logic (choose full vs label-based)
-      - name: Wipe namespace clean
+      - name: Wipe namespace clean (with debug)
         run: |
           echo "🔄 Starting wipe of namespace '${NAMESPACE}'"
+          kubectl get ns "${NAMESPACE}" -o yaml || echo "⚠️ Namespace not found or already gone"
           if [[ "${{ inputs.label_based_wipe }}" == "true" ]]; then
             echo "🚿 Using label-based deletion with label 'app=curs-valutar'"
             for kind in $(kubectl api-resources --namespaced=true --verbs=list -o name); do
-              kubectl delete "$kind" -n "${NAMESPACE}" -l app=curs-valutar --ignore-not-found=true --wait
+              echo "🔍 Deleting kind: $kind in namespace: ${NAMESPACE}"
+              kubectl get "$kind" -n "${NAMESPACE}" -l app=curs-valutar --ignore-not-found=true || echo "🔎 Nothing to delete for kind: $kind"
+              kubectl delete "$kind" -n "${NAMESPACE}" -l app=curs-valutar --ignore-not-found=true --wait || echo "⚠️ Deletion failed for kind: $kind"
             done
           else
             echo "🧨 Deleting full namespace '${NAMESPACE}'"
-            kubectl delete ns "${NAMESPACE}" --ignore-not-found=true --wait
+            kubectl delete ns "${NAMESPACE}" --ignore-not-found=false --wait || echo "⚠️ Namespace deletion failed or timed out"
+            echo "⏳ Waiting for namespace to be fully deleted..."
+            for i in {1..30}; do
+              sleep 2
+              kubectl get ns "${NAMESPACE}" &> /dev/null && echo "⏱ Namespace still exists..." || break
+            done
             echo "🔧 Recreating namespace '${NAMESPACE}'"
-            kubectl create ns "${NAMESPACE}"
+            kubectl create ns "${NAMESPACE}" || echo "⚠️ Failed to recreate namespace"
           fi
       # 8️⃣ Optional: flux sync
       - name: Flux reconcile
