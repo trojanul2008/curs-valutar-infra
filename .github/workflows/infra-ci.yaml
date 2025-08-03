@@ -270,8 +270,16 @@ jobs:
       - name: Run Trivy scan
         run: |
           chmod +x scripts/utils/scan-images.sh
-          TRIVY_CACHE_DIR="${TRIVY_CACHE_DIR}" scripts/utils/scan-images.sh > trivy-report.txt
+          TRIVY_CACHE_DIR="${TRIVY_CACHE_DIR}" scripts/utils/scan-images.sh > trivy-report.txt || true
           grep 'CRITICAL\|HIGH' trivy-report.txt > trivy-summary.txt || true
+          awk '/Image:/ {img=$0} /CRITICAL|HIGH/ {print img "\n" $0 "\n"}' trivy-report.txt >> trivy-summary.txt || true
+      - name: Fail on vulnerabilities
+        if: always()
+        run: |
+          if grep -q 'CRITICAL\|HIGH' trivy-report.txt; then
+            echo "🚨 Vulnerabilities found"
+            exit 1
+          fi
       - name: Display vulnerability summary
         if: failure()
         run: cat vulnerability-details.txt || echo "No vulnerabilities found or file missing"
