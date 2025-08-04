@@ -1,0 +1,11 @@
+name: "Install kyverno"
+description: "Installs kyverno CLI using version from versions.yaml"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Run kyverno installer
+      shell: bash
+      run: |
+        chmod +x ${{ github.action_path }}/install.sh
+        ${{ github.action_path }}/install.sh

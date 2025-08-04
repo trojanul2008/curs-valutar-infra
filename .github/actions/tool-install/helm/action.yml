@@ -1,0 +1,11 @@
+name: "Install helm"
+description: "Installs helm using version from versions.yaml"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Run helm installer
+      shell: bash
+      run: |
+        chmod +x ${{ github.action_path }}/install.sh
+        ${{ github.action_path }}/install.sh

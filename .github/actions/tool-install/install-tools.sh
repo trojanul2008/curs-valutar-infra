@@ -60,4 +60,3 @@ mkdir -p "$TRIVY_CACHE_DIR"
 tar -xzf trivy.tar.gz && chmod +x trivy && sudo mv trivy /usr/local/bin/
 
 echo "✅ All tools installed successfully!"
-

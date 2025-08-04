@@ -16,14 +16,14 @@ jobs:
   bootstrap:
     name: Bootstrap GitOps stack
     runs-on: ubuntu-latest
-
     env:
       OWNER: trojanul2008
       REPO: curs-valutar-infra
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      # ─────────────────────────────────────────────
+      # ────────────────────────────────────────────────────────────────────────────────
+      # 1.  Validate dispatch input (guardrail for prod / both)
+      # ────────────────────────────────────────────────────────────────────────────────
       - name: Validate input
         id: validate
         run: |
@@ -31,71 +31,87 @@ jobs:
           TARGET="${{ inputs.environment }}"
           CONFIRM="${{ inputs.confirm }}"
           echo "📍 Requested bootstrap: ${TARGET}"
-
           case "${TARGET}" in
             dev|prod|both) ;;
             *) echo "❌ Invalid environment '${TARGET}'. Must be dev, prod, or both."; exit 1 ;;
           esac
-
           if [[ "${TARGET}" != "dev" && "${CONFIRM}" != "YES" ]]; then
             echo "❌ Confirmation required to bootstrap '${TARGET}'. Aborting."
             exit 1
           fi
-
           echo "target=${TARGET}" >> "$GITHUB_OUTPUT"
-
-      # ─────────────────────────────────────────────
+      # ────────────────────────────────────────────────────────────────────────────────
+      # 2.  Source checkout
+      # ────────────────────────────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      # ─────────────────────────────────────────────
+      # ────────────────────────────────────────────────────────────────────────────────
+      # 3.  Restore kubeconfig & verify access
+      # ────────────────────────────────────────────────────────────────────────────────
       - name: Restore kubeconfig
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 --decode > ~/.kube/config
           kubectl config use-context remote-cloudflare
-          echo "🔑 Kubeconfig restored and context set."
-
-      # ─────────────────────────────────────────────
+          echo "🔑 Kubeconfig restored and context set: $(kubectl config current-context)"
       - name: Verify cluster access
-        run: kubectl get nodes --context=remote-cloudflare
-
-      # ─────────────────────────────────────────────
-      - name: Install tools
-        uses: ./.github/actions/tool-install/install-tools.sh
-
-      # ─────────────────────────────────────────────
+        run: kubectl get nodes
+      # ────────────────────────────────────────────────────────────────────────────────
+      # 4.  YAML / installer contract validation
+      # ────────────────────────────────────────────────────────────────────────────────
+      - name: Validate CLI version keys
+        run: ./scripts/utils/validate-version-keys.sh
+      # ────────────────────────────────────────────────────────────────────────────────
+      # 5.  Install required CLI tooling
+      # ────────────────────────────────────────────────────────────────────────────────
+      - name: Install CLI tools
+        uses: ./.github/actions/tool-install
+      # ────────────────────────────────────────────────────────────────────────────────
+      # 6.  Figure out which environments to bootstrap
+      # ────────────────────────────────────────────────────────────────────────────────
       - name: Set target environments
         id: envs
         run: |
           TARGET="${{ steps.validate.outputs.target }}"
-          if [[ "${TARGET}" == "both" ]]; then
-            echo "list=dev prod" >> "$GITHUB_OUTPUT"
-          else
+          [[ "$TARGET" == "both" ]] && echo "list=dev prod" >> "$GITHUB_OUTPUT" || \
             echo "list=${TARGET}" >> "$GITHUB_OUTPUT"
-          fi
-
-      # ─────────────────────────────────────────────
-      - name: Create namespaces
+      # ────────────────────────────────────────────────────────────────────────────────
+      # 7.  Ensure namespaces exist
+      # ────────────────────────────────────────────────────────────────────────────────
+      - name: Create target namespaces
         run: |
           for NS in ${{ steps.envs.outputs.list }}; do
             echo "🔧 Ensuring namespace '${NS}' exists..."
-            kubectl create ns "${NS}" --context=remote-cloudflare || true
+            kubectl create ns "${NS}" 2>/dev/null || echo "✔️  Namespace '${NS}' already present"
           done
-
-      # ─────────────────────────────────────────────
-      - name: Install Kyverno (once, cluster-wide)
+      # ────────────────────────────────────────────────────────────────────────────────
+      # 8.  Install Kyverno (idempotent)
+      # ────────────────────────────────────────────────────────────────────────────────
+      - name: Install Kyverno (cluster-wide, idempotent)
         run: |
-          kubectl create ns kyverno --context=remote-cloudflare || true
-          kubectl apply --context=remote-cloudflare -f \
-            https://raw.githubusercontent.com/kyverno/kyverno/main/config/release/install.yaml
-
-      # ─────────────────────────────────────────────
+          if ! kubectl get deploy -n kyverno kyverno 1>/dev/null 2>&1; then
+            echo "🚀 Installing Kyverno..."
+            kubectl create ns kyverno 2>/dev/null || true
+            kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/main/config/release/install.yaml
+          else
+            echo "✅ Kyverno already installed"
+          fi
+      # ────────────────────────────────────────────────────────────────────────────────
+      # 9.  Flux bootstrap per environment (skip if already done)
+      # ────────────────────────────────────────────────────────────────────────────────
       - name: Flux bootstrap for environment(s)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # Used by flux bootstrap
         run: |
           set -euo pipefail
           for ENV in ${{ steps.envs.outputs.list }}; do
-            echo "🚀 Bootstrapping '${ENV}' branch…"
+            echo ""
+            echo "⚡ Checking if Flux already bootstrapped for '${ENV}'..."
+            if kubectl get kustomization -n flux-system "${ENV}" 1>/dev/null 2>&1; then
+              echo "✅ Flux already bootstrapped for '${ENV}' — skipping."
+              continue
+            fi
+            echo "🚀 Bootstrapping Flux for '${ENV}'..."
             flux bootstrap github \
               --context=remote-cloudflare \
               --owner="${OWNER}" \
@@ -104,7 +120,8 @@ jobs:
               --path="infrastructure/flux/flux-system/manifests" \
               --personal
           done
-
-      # ─────────────────────────────────────────────
+      # ────────────────────────────────────────────────────────────────────────────────
+      # 10. Verify Flux reconciliation
+      # ────────────────────────────────────────────────────────────────────────────────
       - name: Verify Flux reconciliation
         run: flux get kustomizations --context=remote-cloudflare

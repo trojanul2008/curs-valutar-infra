@@ -1,23 +1,29 @@
-name: "Install CLI Tools"
-description: "Installs kubectl, flux, and helm using provided versions"
-inputs:
-  kubectl:
-    description: "Kubectl version"
-    required: true
-  flux:
-    description: "Flux version"
-    required: true
-  helm:
-    description: "Helm version"
-    required: true
+name: "Install All CLI Tools"
+description: "Installs all required tools by calling per-tool actions"
+
 runs:
   using: "composite"
   steps:
-    - name: Run installer script
-      shell: bash
-      run: |
-        chmod +x ${{ github.action_path }}/install-tools.sh
-        ${{ github.action_path }}/install-tools.sh \
-          "${{ inputs.kubectl }}" \
-          "${{ inputs.flux }}" \
-          "${{ inputs.helm }}"
+    - name: Install kubectl
+      uses: ./github/actions/tool-install/kubectl
+
+    - name: Install flux
+      uses: ./github/actions/tool-install/flux
+
+    - name: Install helm
+      uses: ./github/actions/tool-install/helm
+
+    - name: Install kustomize
+      uses: ./github/actions/tool-install/kustomize
+
+    - name: Install kubeconform
+      uses: ./github/actions/tool-install/kubeconform
+
+    - name: Install kyverno CLI
+      uses: ./github/actions/tool-install/kyverno
+
+    - name: Install yq
+      uses: ./github/actions/tool-install/yq
+
+    - name: Install trivy
+      uses: ./github/actions/tool-install/trivy
