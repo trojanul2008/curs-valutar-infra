@@ -68,8 +68,10 @@ cp kubectl "$BIN"
 sudo mv kubectl /usr/local/bin/kubectl
 
 # ----- Validate Final Version -------------------------------------------------
-if ! validate_version_match kubectl "$VERSION"; then
-  log_error "kubectl installed but version check failed"
+INSTALLED_VERSION="$(kubectl version --client --short | awk '{print $3}' | cut -d'+' -f1)"
+
+if [[ "$INSTALLED_VERSION" != "$VERSION" ]]; then
+  log_error "kubectl installed but version '$INSTALLED_VERSION' does not match expected '$VERSION'"
   exit 1
 fi
 

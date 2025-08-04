@@ -1,4 +1,4 @@
-kubectl: v1.29.2
+kubectl: v1.32.3
 flux: v2.6.4
 helm: 3.13.3
 kustomize: v5.0.2
