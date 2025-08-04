@@ -55,7 +55,7 @@ if [[ -f "$BIN" ]]; then
 fi
 
 # ----- Download & Extract -----------------------------------------------------
-URL="https://github.com/helm/helm/releases/download/${TAG}/helm-${TAG}-${OS}-${ARCH}.tar.gz"
+URL="https://get.helm.sh/helm-v${VERSION}-${OS}-${ARCH}.tar.gz"
 log_info "Downloading helm ${VERSION} for ${OS}/${ARCH}"
 log_info "URL: ${URL}"
 
