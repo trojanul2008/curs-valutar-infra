@@ -8,8 +8,8 @@ on:
         required: true
         default: dev
       confirm:
-        description: "Type YES to confirm full deletion"
-        required: true
+        description: "Type YES to confirm deletion (only required for prod)"
+        required: false
         default: ""
 
 jobs:
@@ -18,11 +18,15 @@ jobs:
     steps:
       - name: Validate inputs
         run: |
-          if [[ "${{ inputs.confirm }}" != "YES" ]]; then
-            echo "❌ Deletion not confirmed. Aborting."
+          NAMESPACE="${{ inputs.namespace }}"
+          echo "📍 Namespace selected: '${NAMESPACE}'"
+
+          if [[ "$NAMESPACE" == "prod" && "${{ inputs.confirm }}" != "YES" ]]; then
+            echo "❌ Confirmation required to wipe production. Aborting."
             exit 1
           fi
-          echo "✅ Confirmed wipe of namespace '${{ inputs.namespace }}'"
+
+          echo "✅ Wipe confirmed for namespace '${NAMESPACE}'"
       - name: Restore kubeconfig
         run: |
           mkdir -p ~/.kube
