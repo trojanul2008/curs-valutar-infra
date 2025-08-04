@@ -1,11 +1,9 @@
 name: "Install kubectl"
-description: "Installs kubectl using version from versions.yaml"
-
+description: "Installs kubectl CLI"
 runs:
   using: "composite"
   steps:
-    - name: Run kubectl installer
+    - run: |
+        chmod +x ./install.sh
+        ./install.sh
       shell: bash
-      run: |
-        chmod +x ${{ github.action_path }}/install.sh
-        ${{ github.action_path }}/install.sh

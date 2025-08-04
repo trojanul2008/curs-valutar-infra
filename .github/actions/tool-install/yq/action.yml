@@ -1,11 +1,9 @@
 name: "Install yq"
-description: "Installs yq using version from versions.yaml"
-
+description: "Installs yq CLI"
 runs:
   using: "composite"
   steps:
-    - name: Run yq installer
+    - run: |
+        chmod +x ./install.sh
+        ./install.sh
       shell: bash
-      run: |
-        chmod +x ${{ github.action_path }}/install.sh
-        ${{ github.action_path }}/install.sh

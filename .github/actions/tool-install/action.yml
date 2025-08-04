@@ -5,25 +5,25 @@ runs:
   using: "composite"
   steps:
     - name: Install kubectl
-      uses: ./github/actions/tool-install/kubectl
+      uses: ./.github/actions/tool-install/kubectl
 
     - name: Install flux
-      uses: ./github/actions/tool-install/flux
+      uses: ./.github/actions/tool-install/flux
 
     - name: Install helm
-      uses: ./github/actions/tool-install/helm
+      uses: ./.github/actions/tool-install/helm
 
     - name: Install kustomize
-      uses: ./github/actions/tool-install/kustomize
+      uses: ./.github/actions/tool-install/kustomize
 
     - name: Install kubeconform
-      uses: ./github/actions/tool-install/kubeconform
+      uses: ./.github/actions/tool-install/kubeconform
 
     - name: Install kyverno CLI
-      uses: ./github/actions/tool-install/kyverno
+      uses: ./.github/actions/tool-install/kyverno
 
     - name: Install yq
-      uses: ./github/actions/tool-install/yq
+      uses: ./.github/actions/tool-install/yq
 
     - name: Install trivy
-      uses: ./github/actions/tool-install/trivy
+      uses: ./.github/actions/tool-install/trivy

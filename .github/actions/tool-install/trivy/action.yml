@@ -1,11 +1,9 @@
 name: "Install trivy"
-description: "Installs trivy using version from versions.yaml"
-
+description: "Installs trivy CLI"
 runs:
   using: "composite"
   steps:
-    - name: Run trivy installer
+    - run: |
+        chmod +x ./install.sh
+        ./install.sh
       shell: bash
-      run: |
-        chmod +x ${{ github.action_path }}/install.sh
-        ${{ github.action_path }}/install.sh

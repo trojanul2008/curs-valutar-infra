@@ -1,11 +1,9 @@
 name: "Install kustomize"
-description: "Installs kustomize using version from versions.yaml"
-
+description: "Installs kustomize CLI"
 runs:
   using: "composite"
   steps:
-    - name: Run kustomize installer
+    - run: |
+        chmod +x ./install.sh
+        ./install.sh
       shell: bash
-      run: |
-        chmod +x ${{ github.action_path }}/install.sh
-        ${{ github.action_path }}/install.sh

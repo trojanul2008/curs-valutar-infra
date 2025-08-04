@@ -1,5 +1,5 @@
-name: "Install kubeconform"
-description: "Installs kubeconform CLI"
+name: "Install flux"
+description: "Installs flux CLI"
 runs:
   using: "composite"
   steps:
