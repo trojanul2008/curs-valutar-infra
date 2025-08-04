@@ -60,8 +60,13 @@ cp kustomize "$BIN"
 sudo mv kustomize /usr/local/bin/kustomize
 
 # ----- Validate Final Version -------------------------------------------------
-if ! validate_version_match kustomize "$VERSION"; then
-  log_error "kustomize installed but version check failed"
+log_info "Raw kustomize version: $(kustomize version)"
+
+INSTALLED_VERSION="$(kustomize version | tr -d '[:space:]')"
+EXPECTED_VERSION="$(echo "$VERSION" | tr -d '[:space:]')"
+
+if [[ "$INSTALLED_VERSION" != "$EXPECTED_VERSION" ]]; then
+  log_error "Installed kustomize version '$INSTALLED_VERSION' does not match expected '$VERSION'"
   exit 1
 fi
 
