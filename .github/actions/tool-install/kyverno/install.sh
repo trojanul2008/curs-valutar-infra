@@ -2,7 +2,7 @@
 set -euo pipefail
 
 KEY="kyverno"
-VERSIONS_FILE=".github/versions.yaml"
+VERSIONS_FILE="${GITHUB_WORKSPACE}/.github/versions.yaml"
 VERSION=$(grep "^${KEY}:" "$VERSIONS_FILE" | awk '{print $2}')
 ARCH=$(uname -m)
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
