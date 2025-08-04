@@ -2,50 +2,109 @@ name: 🚀 Bootstrap Infrastructure
 
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment to bootstrap (dev, prod, or both)"
+        required: true
+        default: dev
+      confirm:
+        description: "Type YES to confirm bootstrapping prod or both"
+        required: false
+        default: ""
 
 jobs:
   bootstrap:
     name: Bootstrap GitOps stack
     runs-on: ubuntu-latest
 
+    env:
+      OWNER: trojanul2008
+      REPO: curs-valutar-infra
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     steps:
+      # ─────────────────────────────────────────────
+      - name: Validate input
+        id: validate
+        run: |
+          set -euo pipefail
+          TARGET="${{ inputs.environment }}"
+          CONFIRM="${{ inputs.confirm }}"
+          echo "📍 Requested bootstrap: ${TARGET}"
+
+          case "${TARGET}" in
+            dev|prod|both) ;;
+            *) echo "❌ Invalid environment '${TARGET}'. Must be dev, prod, or both."; exit 1 ;;
+          esac
+
+          if [[ "${TARGET}" != "dev" && "${CONFIRM}" != "YES" ]]; then
+            echo "❌ Confirmation required to bootstrap '${TARGET}'. Aborting."
+            exit 1
+          fi
+
+          echo "target=${TARGET}" >> "$GITHUB_OUTPUT"
+
+      # ─────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ─────────────────────────────────────────────
       - name: Restore kubeconfig
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 --decode > ~/.kube/config
           kubectl config use-context remote-cloudflare
+          echo "🔑 Kubeconfig restored and context set."
 
-      - name: Verify remote cluster access
-        run: kubectl --context=remote-cloudflare get nodes
+      # ─────────────────────────────────────────────
+      - name: Verify cluster access
+        run: kubectl get nodes --context=remote-cloudflare
 
-      - name: Install dependencies
-        uses: ./.github/workflows/tool-install.yaml
+      # ─────────────────────────────────────────────
+      - name: Install tools
+        uses: ./.github/actions/tool-install
 
-      - name: Create required namespaces
+      # ─────────────────────────────────────────────
+      - name: Set target environments
+        id: envs
         run: |
-          kubectl create ns dev --context=remote-cloudflare || true
-          kubectl create ns prod --context=remote-cloudflare || true
+          TARGET="${{ steps.validate.outputs.target }}"
+          if [[ "${TARGET}" == "both" ]]; then
+            echo "list=dev prod" >> "$GITHUB_OUTPUT"
+          else
+            echo "list=${TARGET}" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Install Kyverno
+      # ─────────────────────────────────────────────
+      - name: Create namespaces
         run: |
-          kubectl --context=remote-cloudflare create ns kyverno || true
-          kubectl --context=remote-cloudflare apply -f \
+          for NS in ${{ steps.envs.outputs.list }}; do
+            echo "🔧 Ensuring namespace '${NS}' exists..."
+            kubectl create ns "${NS}" --context=remote-cloudflare || true
+          done
+
+      # ─────────────────────────────────────────────
+      - name: Install Kyverno (once, cluster-wide)
+        run: |
+          kubectl create ns kyverno --context=remote-cloudflare || true
+          kubectl apply --context=remote-cloudflare -f \
             https://raw.githubusercontent.com/kyverno/kyverno/main/config/release/install.yaml
 
-      - name: Flux Bootstrap
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # ─────────────────────────────────────────────
+      - name: Flux bootstrap for environment(s)
         run: |
-          flux bootstrap github \
-            --context=remote-cloudflare \
-            --owner=trojanul2008 \
-            --repository=curs-valutar-infra \
-            --branch=dev \
-            --path=infrastructure/flux/flux-system/manifests \
-            --personal
+          set -euo pipefail
+          for ENV in ${{ steps.envs.outputs.list }}; do
+            echo "🚀 Bootstrapping '${ENV}' branch…"
+            flux bootstrap github \
+              --context=remote-cloudflare \
+              --owner="${OWNER}" \
+              --repository="${REPO}" \
+              --branch="${ENV}" \
+              --path="infrastructure/flux/flux-system/manifests" \
+              --personal
+          done
 
+      # ─────────────────────────────────────────────
       - name: Verify Flux reconciliation
         run: flux get kustomizations --context=remote-cloudflare
