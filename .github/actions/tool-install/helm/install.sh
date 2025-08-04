@@ -76,8 +76,11 @@ cp helm "$BIN"
 sudo mv helm /usr/local/bin/helm
 
 # ----- Validate Final Version -------------------------------------------------
-if ! validate_version_match helm "$VERSION"; then
-  log_error "helm installed but version check failed"
+INSTALLED_VERSION="$(helm version --short 2>/dev/null | awk -F '+' '{print $1}' | tr -d '[:space:]')"
+EXPECTED_VERSION="$(echo "$VERSION" | tr -d '[:space:]')"
+
+if [[ "$INSTALLED_VERSION" != "$EXPECTED_VERSION" && "$INSTALLED_VERSION" != "v${EXPECTED_VERSION}" ]]; then
+  log_error "Installed helm version '$INSTALLED_VERSION' does not match expected '$VERSION'"
   exit 1
 fi
 
