@@ -60,7 +60,9 @@ jobs:
       # 4.  YAML / installer contract validation
       # ────────────────────────────────────────────────────────────────────────────────
       - name: Validate CLI version keys
-        run: ./scripts/utils/validate-version-keys.sh
+        run: |
+          chmod +x ./scripts/utils/validate-version-keys.sh  
+          ./scripts/utils/validate-version-keys.sh
       # ────────────────────────────────────────────────────────────────────────────────
       # 5.  Install required CLI tooling
       # ────────────────────────────────────────────────────────────────────────────────
