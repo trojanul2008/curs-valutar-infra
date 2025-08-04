@@ -1,7 +1,7 @@
 kubectl: v1.32.3
 flux: v2.6.4
 helm: 3.18.4
-kustomize: v5.0.2
+kustomize: v5.7.1
 kubeconform: v0.6.7
 kyverno: v1.12.4
 yq: v4.43.1

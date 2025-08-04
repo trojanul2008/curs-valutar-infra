@@ -22,6 +22,12 @@ VERSION="$(grep "^${KEY}:" "$VERSIONS_FILE" | awk '{print $2}')"
 ARCH="$(uname -m)"
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 
+case "$(uname -m)" in
+  x86_64|amd64) ARCH="amd64" ;;
+  arm64|aarch64) ARCH="arm64" ;;
+  *) log_error "Unsupported architecture: $(uname -m)"; exit 1 ;;
+esac
+
 # ----- Paths ------------------------------------------------------------------
 CACHE="/tmp/tool-cache/${KEY}-${VERSION}"
 BIN="${CACHE}/kustomize"
@@ -40,18 +46,12 @@ if [[ -f "$BIN" ]]; then
 fi
 
 # ----- Download & Extract -----------------------------------------------------
-URL="https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${VERSION}/kustomize_${VERSION}_${OS}_${ARCH}.tar.gz"
+# ----- Download ---------------------------------------------------------------
+URL="https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${VERSION}/kustomize_${VERSION}_${OS}_${ARCH}"
 log_info "Downloading kustomize ${VERSION} for ${OS}/${ARCH}"
 log_info "URL: ${URL}"
 
-TMPDIR="$(mktemp -d)"
-cd "$TMPDIR"
-
-if ! curl -sSL "$URL" | tar xz; then
-  log_error "Download or extraction failed for kustomize"
-  exit 1
-fi
-
+curl -sSL -o kustomize "$URL"
 chmod +x kustomize
 
 # ----- Cache & Move -----------------------------------------------------------
