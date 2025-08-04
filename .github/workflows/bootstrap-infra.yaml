@@ -62,7 +62,7 @@ jobs:
 
       # ─────────────────────────────────────────────
       - name: Install tools
-        uses: ./.github/actions/tool-install
+        uses: ./.github/actions/tool-install/install-tools.sh
 
       # ─────────────────────────────────────────────
       - name: Set target environments
