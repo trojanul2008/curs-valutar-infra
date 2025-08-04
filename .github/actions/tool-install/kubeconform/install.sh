@@ -22,6 +22,12 @@ VERSION="$(grep "^${KEY}:" "$VERSIONS_FILE" | awk '{print $2}')"
 ARCH="$(uname -m)"
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 
+case "$(uname -m)" in
+  x86_64|amd64) ARCH="amd64" ;;
+  arm64|aarch64) ARCH="arm64" ;;
+  *) log_error "Unsupported architecture: $(uname -m)"; exit 1 ;;
+esac
+
 # ----- Paths ------------------------------------------------------------------
 CACHE="/tmp/tool-cache/${KEY}-${VERSION}"
 BIN="${CACHE}/kubeconform"
