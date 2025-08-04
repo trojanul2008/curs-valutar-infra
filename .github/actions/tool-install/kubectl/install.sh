@@ -2,72 +2,76 @@
 set -euo pipefail
 
 # --------------------------------------------------
-# 🛠️ kubectl Installer with:
+# 🛠️ Kubectl Installer with:
 #   – Version from versions.yaml
 #   – ARCH/OS normalization
 #   – Caching
-#   – Binary validation
+#   – Logging & Version validation via utils.sh
 # --------------------------------------------------
+
+# ----- Import Utilities -------------------------------------------------------
+UTILS="${GITHUB_WORKSPACE}/.github/actions/common/utils.sh"
+source "$UTILS"
 
 # ----- Configuration ----------------------------------------------------------
 VERSIONS_FILE="${GITHUB_WORKSPACE}/.github/versions.yaml"
 KEY="kubectl"
-
-# Extract version for kubectl from versions.yaml
 VERSION="$(grep "^${KEY}:" "$VERSIONS_FILE" | awk '{print $2}')"
 
-# ----- Platform Detection & Normalization -------------------------------------
+# ----- Platform Detection -----------------------------------------------------
 RAW_ARCH="$(uname -m)"
 RAW_OS="$(uname -s)"
 
-# Normalize architecture
 case "$RAW_ARCH" in
-  x86_64|amd64)      ARCH="amd64"  ;;
-  arm64|aarch64)     ARCH="arm64"  ;;
-  armv7l|armv6l)     ARCH="arm"    ;;  # Included for completeness
-  *)                 echo "❌ Unsupported architecture: $RAW_ARCH" >&2; exit 1 ;;
+  x86_64|amd64)      ARCH="amd64" ;;
+  arm64|aarch64)     ARCH="arm64" ;;
+  *)                 log_error "Unsupported architecture: $RAW_ARCH"; exit 1 ;;
 esac
 
-# Normalize OS
 case "$RAW_OS" in
-  Linux*)  OS="linux"  ;;
+  Linux*)  OS="linux" ;;
   Darwin*) OS="darwin" ;;
-  *)       echo "❌ Unsupported OS: $RAW_OS" >&2; exit 1 ;;
+  *)       log_error "Unsupported OS: $RAW_OS"; exit 1 ;;
 esac
 
 # ----- Paths ------------------------------------------------------------------
 CACHE="/tmp/tool-cache/${KEY}-${VERSION}"
 BIN="${CACHE}/kubectl"
 
-# ----- Check cache ------------------------------------------------------------
+# ----- Use Cached Binary if Available -----------------------------------------
 if [[ -f "$BIN" ]]; then
-  echo "✅ Cached kubectl found for ${OS}/${ARCH} at ${BIN}"
+  log_success "Cached kubectl found for ${OS}/${ARCH} at ${BIN}"
   sudo cp "$BIN" /usr/local/bin/kubectl
-  exit 0
+  if validate_version_match kubectl "$VERSION"; then
+    log_success "kubectl ${VERSION} activated from cache"
+    exit 0
+  else
+    log_error "Cached kubectl version mismatch — redownloading"
+    rm -f "$BIN"
+  fi
 fi
 
 # ----- Download ---------------------------------------------------------------
 URL="https://dl.k8s.io/release/${VERSION}/bin/${OS}/${ARCH}/kubectl"
-echo "📦 Downloading kubectl ${VERSION} for ${OS}/${ARCH}..."
-echo "🔗 ${URL}"
+log_info "Downloading kubectl ${VERSION} for ${OS}/${ARCH}"
+log_info "URL: ${URL}"
 
 curl -sSL --fail -o kubectl "${URL}" || {
-  echo "❌ Download failed — curl couldn't retrieve the binary." >&2
+  log_error "kubectl download failed"
   exit 1
 }
-
-# ----- Validate binary --------------------------------------------------------
-if ! file kubectl | grep -qE 'ELF|Mach-O'; then
-  echo "❌ Downloaded file is not a valid executable for ${OS}/${ARCH}" >&2
-  echo "🔍 URL tried: ${URL}" >&2
-  exit 1
-fi
 
 # ----- Install & Cache --------------------------------------------------------
 chmod +x kubectl
 mkdir -p "$CACHE"
 cp kubectl "$BIN"
-sudo mv kubectl /usr/local/bin/
+sudo mv kubectl /usr/local/bin/kubectl
 
-echo "✅ kubectl $(kubectl version --client --short | tr -d '\n') installed successfully."
+# ----- Validate Final Version -------------------------------------------------
+if ! validate_version_match kubectl "$VERSION"; then
+  log_error "kubectl installed but version check failed"
+  exit 1
+fi
+
+log_success "kubectl ${VERSION} installed successfully"
 

@@ -2,57 +2,80 @@
 set -euo pipefail
 
 # --------------------------------------------------
-# 🛠️ Helm Installer with:
-#   – Version from versions.yaml
-#   – ARCH/OS normalization
-#   – Caching
+# 🛠️ Helm Installer
+#   – Uses shared utils for logging + version checks
+#   – Normalizes platform
+#   – Caches binary for reuse
 # --------------------------------------------------
+
+# ----- Import Utilities -------------------------------------------------------
+UTILS="${GITHUB_WORKSPACE}/.github/actions/common/utils.sh"
+source "$UTILS"
 
 # ----- Configuration ----------------------------------------------------------
 VERSIONS_FILE="${GITHUB_WORKSPACE}/.github/versions.yaml"
 KEY="helm"
 VERSION="$(grep "^${KEY}:" "$VERSIONS_FILE" | awk '{print $2}')"
 
-# ----- Platform Detection & Normalization -------------------------------------
+# ----- Platform Detection -----------------------------------------------------
 RAW_ARCH="$(uname -m)"
 RAW_OS="$(uname -s)"
 
 case "$RAW_ARCH" in
   x86_64|amd64)      ARCH="amd64" ;;
   arm64|aarch64)     ARCH="arm64" ;;
-  *)                 echo "❌ Unsupported architecture: $RAW_ARCH" >&2; exit 1 ;;
+  *)                 log_error "Unsupported architecture: $RAW_ARCH"; exit 1 ;;
 esac
 
 case "$RAW_OS" in
   Linux*)  OS="linux" ;;
   Darwin*) OS="darwin" ;;
-  *)       echo "❌ Unsupported OS: $RAW_OS" >&2; exit 1 ;;
+  *)       log_error "Unsupported OS: $RAW_OS"; exit 1 ;;
 esac
 
 # ----- Paths ------------------------------------------------------------------
 CACHE="/tmp/tool-cache/${KEY}-${VERSION}"
 BIN="${CACHE}/helm"
 
-# ----- Check cache ------------------------------------------------------------
+# ----- Use Cached Binary if Available -----------------------------------------
 if [[ -f "$BIN" ]]; then
-  echo "✅ Cached helm found for ${OS}/${ARCH} at ${BIN}"
+  log_success "Cached helm found for ${OS}/${ARCH} at ${BIN}"
   sudo cp "$BIN" /usr/local/bin/helm
-  exit 0
+  if validate_version_match helm "$VERSION"; then
+    log_success "helm ${VERSION} activated from cache"
+    exit 0
+  else
+    log_error "Cached helm version mismatch — redownloading"
+    rm -f "$BIN"
+  fi
 fi
 
-# ----- Download ---------------------------------------------------------------
+# ----- Download & Extract -----------------------------------------------------
 URL="https://get.helm.sh/helm-${VERSION}-${OS}-${ARCH}.tar.gz"
-echo "📦 Downloading helm ${VERSION} for ${OS}/${ARCH}..."
-echo "🔗 ${URL}"
+log_info "Downloading helm ${VERSION} for ${OS}/${ARCH}"
+log_info "URL: ${URL}"
 
-curl -sL "${URL}" | tar xz
+TMPDIR="$(mktemp -d)"
+cd "$TMPDIR"
+
+if ! curl -sSL "${URL}" | tar xz; then
+  log_error "Download or extraction failed for Helm ${VERSION}"
+  exit 1
+fi
+
 mv "${OS}-${ARCH}/helm" helm
-
-# ----- Install & Cache --------------------------------------------------------
 chmod +x helm
+
+# ----- Cache & Move -----------------------------------------------------------
 mkdir -p "$CACHE"
 cp helm "$BIN"
-sudo mv helm /usr/local/bin/
+sudo mv helm /usr/local/bin/helm
 
-echo "✅ helm ${VERSION} installed successfully."
+# ----- Validate Final Version -------------------------------------------------
+if ! validate_version_match helm "$VERSION"; then
+  log_error "helm installed but version check failed"
+  exit 1
+fi
+
+log_success "helm ${VERSION} installed successfully"
 

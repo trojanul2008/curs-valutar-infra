@@ -5,8 +5,12 @@ set -euo pipefail
 # 🛠️ Flux Installer with:
 #   – Version from versions.yaml
 #   – Caching
-#   – CLI validation
+#   – Logging & Version validation via utils.sh
 # --------------------------------------------------
+
+# ----- Import Utilities -------------------------------------------------------
+UTILS="${GITHUB_WORKSPACE}/.github/actions/common/utils.sh"
+source "$UTILS"
 
 # ----- Configuration ----------------------------------------------------------
 VERSIONS_FILE="${GITHUB_WORKSPACE}/.github/versions.yaml"
@@ -17,27 +21,37 @@ VERSION="$(grep "^${KEY}:" "$VERSIONS_FILE" | awk '{print $2}')"
 CACHE="/tmp/tool-cache/${KEY}-${VERSION}"
 BIN="${CACHE}/flux"
 
-# ----- Check cache ------------------------------------------------------------
+# ----- Use Cached Binary if Available -----------------------------------------
 if [[ -f "$BIN" ]]; then
-  echo "✅ Cached flux found at ${BIN}"
+  log_success "Cached flux found at ${BIN}"
   sudo cp "$BIN" /usr/local/bin/flux
-  exit 0
+  if validate_version_match flux "$VERSION"; then
+    log_success "flux ${VERSION} activated from cache"
+    exit 0
+  else
+    log_error "Cached flux version mismatch — redownloading"
+    rm -f "$BIN"
+  fi
 fi
 
-# ----- Install via official script --------------------------------------------
-echo "📦 Installing flux ${VERSION} from fluxcd.io..."
-curl -s https://fluxcd.io/install.sh | bash
+# ----- Download via Official Script -------------------------------------------
+log_info "Installing flux ${VERSION} using fluxcd.io installer..."
 
-# ----- Validate install -------------------------------------------------------
-if ! flux --version | grep -q "${VERSION}"; then
-  echo "❌ Flux version mismatch or install failed" >&2
+if ! curl -s https://fluxcd.io/install.sh | bash; then
+  log_error "flux install.sh script failed"
   exit 1
 fi
 
-# ----- Install & Cache --------------------------------------------------------
+# ----- Cache & Move -----------------------------------------------------------
 mkdir -p "$CACHE"
 cp "$(command -v flux)" "$BIN"
 sudo mv "$BIN" /usr/local/bin/flux
 
-echo "✅ flux ${VERSION} installed successfully."
+# ----- Validate Final Version -------------------------------------------------
+if ! validate_version_match flux "$VERSION"; then
+  log_error "flux installed but version check failed"
+  exit 1
+fi
+
+log_success "flux ${VERSION} installed successfully"
 

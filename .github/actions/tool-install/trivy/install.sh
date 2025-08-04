@@ -4,56 +4,65 @@ set -euo pipefail
 # --------------------------------------------------
 # 🛠️ Trivy Installer with:
 #   – Version from versions.yaml
-#   – ARCH/OS normalization
+#   – Platform detection
 #   – Caching
-#   – Vulnerability scanner setup
+#   – Logging & Version validation via utils.sh
 # --------------------------------------------------
+
+# ----- Import Utilities -------------------------------------------------------
+UTILS="${GITHUB_WORKSPACE}/.github/actions/common/utils.sh"
+source "$UTILS"
 
 # ----- Configuration ----------------------------------------------------------
 VERSIONS_FILE="${GITHUB_WORKSPACE}/.github/versions.yaml"
 KEY="trivy"
 VERSION="$(grep "^${KEY}:" "$VERSIONS_FILE" | awk '{print $2}')"
-export TRIVY_CACHE_DIR="/tmp/.trivy-cache"
 
-# ----- Platform Detection & Normalization -------------------------------------
-RAW_ARCH="$(uname -m)"
-RAW_OS="$(uname -s)"
-
-case "$RAW_ARCH" in
-  x86_64|amd64)      ARCH="amd64"  ;;
-  arm64|aarch64)     ARCH="arm64"  ;;
-  *)                 echo "❌ Unsupported architecture: $RAW_ARCH" >&2; exit 1 ;;
-esac
-
-case "$RAW_OS" in
-  Linux*)  OS="linux"  ;;
-  Darwin*) OS="darwin" ;;
-  *)       echo "❌ Unsupported OS: $RAW_OS" >&2; exit 1 ;;
-esac
+ARCH="$(uname -m)"
+OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 
 # ----- Paths ------------------------------------------------------------------
 CACHE="/tmp/tool-cache/${KEY}-${VERSION}"
 BIN="${CACHE}/trivy"
 
-# ----- Check cache ------------------------------------------------------------
+# ----- Use Cached Binary if Available -----------------------------------------
 if [[ -f "$BIN" ]]; then
-  echo "✅ Cached trivy found for ${OS}/${ARCH} at ${BIN}"
+  log_success "Cached trivy found at ${BIN}"
   sudo cp "$BIN" /usr/local/bin/trivy
-  exit 0
+  if validate_version_match trivy "$VERSION"; then
+    log_success "trivy ${VERSION} activated from cache"
+    exit 0
+  else
+    log_error "Cached trivy version mismatch — redownloading"
+    rm -f "$BIN"
+  fi
 fi
 
-# ----- Download ---------------------------------------------------------------
-URL="https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${OS}-${ARCH}.tar.gz"
-echo "📦 Downloading trivy ${VERSION} for ${OS}/${ARCH}..."
-echo "🔗 ${URL}"
+# ----- Download & Extract -----------------------------------------------------
+URL="https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_${OS}_${ARCH}.tar.gz"
+log_info "Downloading trivy ${VERSION} for ${OS}/${ARCH}"
+log_info "URL: ${URL}"
 
-curl -sSL "${URL}" | tar xz
+TMPDIR="$(mktemp -d)"
+cd "$TMPDIR"
 
-# ----- Install & Cache --------------------------------------------------------
+if ! curl -sSL "$URL" | tar xz; then
+  log_error "Download or extraction failed for trivy"
+  exit 1
+fi
+
 chmod +x trivy
+
+# ----- Cache & Move -----------------------------------------------------------
 mkdir -p "$CACHE"
 cp trivy "$BIN"
-sudo mv trivy /usr/local/bin/
+sudo mv trivy /usr/local/bin/trivy
 
-echo "✅ trivy ${VERSION} installed successfully."
+# ----- Validate Final Version -------------------------------------------------
+if ! validate_version_match trivy "$VERSION"; then
+  log_error "trivy installed but version check failed"
+  exit 1
+fi
+
+log_success "trivy ${VERSION} installed successfully"
 
