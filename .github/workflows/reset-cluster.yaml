@@ -7,8 +7,8 @@ on:
         description: "Target namespace to wipe (e.g. dev or prod)"
         required: true
         default: dev
-      confirm:
-        description: "Type YES to confirm deletion (only required for prod)"
+        confirm:
+      description: "Type YES to confirm deletion (only required for prod)"
         required: false
         default: ""
 
