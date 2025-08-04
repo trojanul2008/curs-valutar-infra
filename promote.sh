@@ -5,45 +5,42 @@ REMOTE=${REMOTE:-origin}
 DEV=${DEV:-dev}
 PROD=${PROD:-prod}
 
-# 0) Ensure working tree is clean
+# 0) Guard: working tree must be clean
 if ! git diff-index --quiet HEAD --; then
   echo "❌ You have uncommitted changes. Please commit or stash before running."
   exit 1
 fi
 
-# 1) Fetch latest from origin
+# 1) Fetch latest refs
 echo "⏳ Fetching ${REMOTE}..."
 git fetch "${REMOTE}" --prune
 
-# 2) Reset local dev to match origin/dev
+# 2) Hard-reset local dev to remote/dev
 echo "🔄 Resetting ${DEV} → ${REMOTE}/${DEV}"
 git checkout "${DEV}"
 git reset --hard "${REMOTE}/${DEV}"
 
-# 3) Check if origin/prod exists
+# 3) Does origin/prod exist?
 if git show-ref --quiet "refs/remotes/${REMOTE}/${PROD}"; then
-  # origin/prod exists → check if dev is an ancestor of prod
-  if git merge-base --is-ancestor "${REMOTE}/${DEV}" "${REMOTE}/${PROD}"; then
-    echo "🔀 Merging ${DEV} → ${PROD}"
-    git checkout "${PROD}"
-    git reset --hard "${REMOTE}/${PROD}"
-    git merge --no-ff "${DEV}" -m "chore: promote ${DEV} → ${PROD}"
-    echo "⏳ Pushing merged ${PROD} → ${REMOTE}/${PROD}"
-    git push "${REMOTE}" "${PROD}"
+  # Compare ancestry: is prod contained in dev?
+  if git merge-base --is-ancestor "${REMOTE}/${PROD}" "${REMOTE}/${DEV}"; then
+    echo "🔀 Fast-forwarding ${PROD} to match ${DEV}"
+    git branch -f "${PROD}" "${DEV}"
+    git push "${REMOTE}" "${PROD}" --force-with-lease --set-upstream
     git checkout "${DEV}"
-    echo "🎉 Promotion complete!"
+    echo "🎉 Promotion complete (fast-forward)."
     exit 0
   fi
-  echo "⚠️ origin/${PROD} and origin/${DEV} have no common ancestor → recreating ${PROD}"
+  echo "⚠️  ${PROD} history diverged → recreating from ${DEV}"
 else
-  echo "✨ origin/${PROD} not found → creating first-time branch ${PROD}"
+  echo "✨ ${PROD} does not yet exist on ${REMOTE} → creating first version"
 fi
 
-# 4) First-time or unrelated histories → force-create prod from dev
+# 4) Force-recreate prod
 echo "🚀 Force-creating ${PROD} from ${DEV}"
 git branch -f "${PROD}" "${DEV}"
 git checkout "${PROD}"
 echo "⏳ Force-pushing ${PROD} → ${REMOTE}/${PROD}"
 git push --force --set-upstream "${REMOTE}" "${PROD}"
 git checkout "${DEV}"
-echo "✔️ ${PROD} is now at the same tip as ${DEV}"
+echo "✔️  ${PROD} is now aligned with ${DEV}"
