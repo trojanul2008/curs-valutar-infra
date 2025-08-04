@@ -15,7 +15,8 @@ source "$UTILS"
 # ----- Configuration ----------------------------------------------------------
 VERSIONS_FILE="${GITHUB_WORKSPACE}/.github/versions.yaml"
 KEY="flux"
-VERSION="$(grep "^${KEY}:" "$VERSIONS_FILE" | awk '{print $2}')"
+VERSION="$(grep "^${KEY}:" "$VERSIONS_FILE" | awk '{print $2}' | sed 's/^v//')"
+
 
 # ----- Paths ------------------------------------------------------------------
 CACHE="/tmp/tool-cache/${KEY}-${VERSION}"
@@ -50,10 +51,8 @@ sudo mv "$BIN" /usr/local/bin/flux
 # ----- Validate Final Version -------------------------------------------------
 INSTALLED="$(flux --version 2>/dev/null | awk '{print $NF}')"
 
-if [[ "$INSTALLED" != "$VERSION" && "$INSTALLED" != "v${VERSION}" ]]; then
+if [[ "$INSTALLED" != "$VERSION" ]]; then
   log_error "Installed flux version '$INSTALLED' does not match expected '$VERSION'"
   exit 1
 fi
-
-log_success "flux ${VERSION} installed successfully"
 
