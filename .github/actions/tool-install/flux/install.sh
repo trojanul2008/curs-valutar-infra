@@ -48,8 +48,10 @@ cp "$(command -v flux)" "$BIN"
 sudo mv "$BIN" /usr/local/bin/flux
 
 # ----- Validate Final Version -------------------------------------------------
-if ! validate_version_match flux "$VERSION"; then
-  log_error "flux installed but version check failed"
+INSTALLED="$(flux --version 2>/dev/null | awk '{print $NF}')"
+
+if [[ "$INSTALLED" != "$VERSION" && "$INSTALLED" != "v${VERSION}" ]]; then
+  log_error "Installed flux version '$INSTALLED' does not match expected '$VERSION'"
   exit 1
 fi
 
