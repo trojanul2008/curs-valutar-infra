@@ -15,7 +15,11 @@ source "$UTILS"
 # ----- Configuration ----------------------------------------------------------
 VERSIONS_FILE="${GITHUB_WORKSPACE}/.github/versions.yaml"
 KEY="helm"
-VERSION="$(grep "^${KEY}:" "$VERSIONS_FILE" | awk '{print $2}')"
+#VERSION="$(grep "^${KEY}:" "$VERSIONS_FILE" | awk '{print $2}')"
+RAW_VERSION="$(grep "^${KEY}:" "$VERSIONS_FILE" | awk '{print $2}')"
+VERSION="$(echo "$RAW_VERSION" | sed 's/^v//')"    # strip v if present
+TAG="v${VERSION}"                                  # ensure v-prefix for GitHub URLs
+
 
 # ----- Platform Detection -----------------------------------------------------
 RAW_ARCH="$(uname -m)"
@@ -51,7 +55,7 @@ if [[ -f "$BIN" ]]; then
 fi
 
 # ----- Download & Extract -----------------------------------------------------
-URL="https://get.helm.sh/helm-${VERSION}-${OS}-${ARCH}.tar.gz"
+URL="https://github.com/helm/helm/releases/download/${TAG}/helm-${TAG}-${OS}-${ARCH}.tar.gz"
 log_info "Downloading helm ${VERSION} for ${OS}/${ARCH}"
 log_info "URL: ${URL}"
 
