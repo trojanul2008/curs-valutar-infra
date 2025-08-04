@@ -7,3 +7,4 @@ runs:
         chmod +x ./install.sh
         ./install.sh
       shell: bash
+      working-directory: ${{ github.action_path }}
