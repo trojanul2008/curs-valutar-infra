@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       namespace:
-        description: "Target namespace to wipe (e.g. dev or prod)"
+        description: "Target namespace to wipe (e.g. dev, prod, or both)"
         required: true
         default: dev
       confirm:
-        description: "Type YES to confirm deletion (only required for prod)"
+        description: "Type YES to confirm deletion (required for prod or both)"
         required: false
         default: ""
 
@@ -19,14 +19,21 @@ jobs:
       - name: Validate inputs
         run: |
           NAMESPACE="${{ inputs.namespace }}"
+          CONFIRM="${{ inputs.confirm }}"
+
           echo "📍 Namespace selected: '${NAMESPACE}'"
 
-          if [[ "$NAMESPACE" == "prod" && "${{ inputs.confirm }}" != "YES" ]]; then
+          if [[ "$NAMESPACE" == "prod" && "$CONFIRM" != "YES" ]]; then
             echo "❌ Confirmation required to wipe production. Aborting."
             exit 1
           fi
 
-          echo "✅ Wipe confirmed for namespace '${NAMESPACE}'"
+          if [[ "$NAMESPACE" == "both" && "$CONFIRM" != "YES" ]]; then
+            echo "❌ Confirmation required to wipe BOTH namespaces. Aborting."
+            exit 1
+          fi
+
+          echo "✅ Wipe confirmed for '${NAMESPACE}'"
       - name: Restore kubeconfig
         run: |
           mkdir -p ~/.kube
@@ -39,41 +46,60 @@ jobs:
           kubectl config current-context
           kubectl get ns
           echo "✅ Cluster access verified."
-      - name: Wipe namespace and related resources
+      - name: Wipe selected namespaces
         run: |
           set -euo pipefail
           NAMESPACE="${{ inputs.namespace }}"
-          echo "🔄 Starting full wipe of namespace '${NAMESPACE}'"
-          echo "💣 Deleting namespace '${NAMESPACE}'"
-          kubectl delete ns "${NAMESPACE}" --wait=false --ignore-not-found
-          echo "⏳ Waiting for deletion to complete (up to 60s)…"
-          for i in {1..30}; do
-            sleep 2
-            kubectl get ns "${NAMESPACE}" &>/dev/null || {
-              echo "✅ Namespace '${NAMESPACE}' deleted."
-              exit 0
-            }
-            echo "  …still terminating"
-          done
-          echo "⚠️ Namespace stuck in Terminating — inspecting finalizers"
-          RAW_NS_JSON=$(kubectl get ns "${NAMESPACE}" -o json || echo "")
-          if [[ -z "${RAW_NS_JSON}" ]]; then
-            echo "❌ Unable to retrieve namespace JSON. Skipping finalizer removal."
-            exit 1
-          fi
-          echo "🔬 Raw namespace JSON:"
-          echo "${RAW_NS_JSON}" | jq .
 
-          echo "🔧 Removing finalizers..."
-          echo "${RAW_NS_JSON}" \
-            | jq 'del(.spec.finalizers)' \
-            | kubectl replace --raw "/api/v1/namespaces/${NAMESPACE}/finalize" -f -
-          echo "🗑️ Namespace '${NAMESPACE}' forced-deleted."
+          if [[ "$NAMESPACE" == "both" ]]; then
+            TARGET_NAMESPACES=("dev" "prod")
+          else
+            TARGET_NAMESPACES=("$NAMESPACE")
+          fi
+
+          for NS in "${TARGET_NAMESPACES[@]}"; do
+            echo "🔄 Starting full wipe of namespace '${NS}'"
+            kubectl delete ns "${NS}" --wait=false --ignore-not-found
+            echo "⏳ Waiting for deletion of '${NS}' (up to 60s)…"
+
+            for i in {1..30}; do
+              sleep 2
+              kubectl get ns "${NS}" &>/dev/null || {
+                echo "✅ Namespace '${NS}' deleted."
+                break
+              }
+              echo "  …still terminating"
+            done
+
+            if kubectl get ns "${NS}" &>/dev/null; then
+              echo "⚠️ Namespace '${NS}' stuck in Terminating — inspecting finalizers"
+              RAW_NS_JSON=$(kubectl get ns "${NS}" -o json || echo "")
+              if [[ -n "${RAW_NS_JSON}" ]]; then
+                echo "🔧 Removing finalizers from '${NS}'"
+                echo "${RAW_NS_JSON}" \
+                  | jq 'del(.spec.finalizers)' \
+                  | kubectl replace --raw "/api/v1/namespaces/${NS}/finalize" -f -
+                echo "🗑️ Namespace '${NS}' forced-deleted."
+              else
+                echo "❌ Unable to retrieve JSON for '${NS}'. Skipping finalizer removal."
+              fi
+            fi
+          done
       - name: Clean up residual resources
         run: |
           echo "🧹 Checking for remaining namespaced resources tied to '${{ inputs.namespace }}'"
-          for kind in $(kubectl api-resources --namespaced=true --verbs=list -o name); do
-            echo "  • Removing ${kind} in '${{ inputs.namespace }}'"
-            kubectl delete "$kind" -n "${{ inputs.namespace }}" --all --wait --ignore-not-found || true
+
+          if [[ "${{ inputs.namespace }}" == "both" ]]; then
+            NS_LIST=("dev" "prod")
+          else
+            NS_LIST=("${{ inputs.namespace }}")
+          fi
+
+          for NS in "${NS_LIST[@]}"; do
+            for kind in $(kubectl api-resources --namespaced=true --verbs=list -o name); do
+              echo "  • Removing ${kind} in '${NS}'"
+              kubectl delete "$kind" -n "${NS}" --all --wait --ignore-not-found || true
+            done
           done
+
           echo "✅ Wipe completed."
