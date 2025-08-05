@@ -79,7 +79,8 @@ cp kyverno "$BIN"
 sudo mv kyverno /usr/local/bin/kyverno
 
 # ----- Validate Final Version -------------------------------------------------
-if ! validate_version_match kyverno "$VERSION"; then
+STRIPPED_VERSION="${VERSION#v}"
+if ! validate_version_match kyverno "$STRIPPED_VERSION"; then
   log_error "❌ kyverno installed but version check failed"
   exit 1
 fi
