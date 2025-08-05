@@ -46,7 +46,11 @@ if [[ -f "$BIN" ]]; then
 fi
 
 # ----- Download & Extract -----------------------------------------------------
+RAW_VERSION="$(grep "^${KEY}:" "$VERSIONS_FILE" | awk '{print $2}')"
+VERSION="$(echo "$RAW_VERSION" | sed 's/^v//')"  # removes leading 'v' if present
+
 URL="https://github.com/kubernetes-sigs/kustomize/releases/download/v${VERSION}/kustomize_v${VERSION}_${OS}_${ARCH}.tar.gz"
+
 
 log_info "Downloading kustomize ${VERSION} for ${OS}/${ARCH}"
 log_info "URL: ${URL}"
