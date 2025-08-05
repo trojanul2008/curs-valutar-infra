@@ -102,6 +102,7 @@ jobs:
             --namespace kyverno \
             --set installCRDs=true \
             --wait \
+            --wait-for-jobs \
             --timeout=300s \
             --debug
       - name: Verify Kyverno components
