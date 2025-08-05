@@ -121,6 +121,7 @@ jobs:
               echo "❌ $DEPLOY failed to become ready"
               exit 1
             fi
+            kubectl get pods -n kyverno -o wide
           done
       # ────────────────────────────────────────────────────────────────────────────────
       # 9.  Flux bootstrap per environment (skip if already done)
