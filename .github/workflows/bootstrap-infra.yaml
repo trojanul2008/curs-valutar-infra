@@ -102,9 +102,11 @@ jobs:
             --namespace kyverno \
             --set installCRDs=true \
             --wait \
-            --wait-for-jobs \
             --timeout=300s \
+            --no-hooks \
             --debug
+          # now cleanup old reports manually
+          kubectl delete job kyverno-clean-reports -n kyverno || true
       - name: Verify Kyverno components
         run: |
           set -euo pipefail
