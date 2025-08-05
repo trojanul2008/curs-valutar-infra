@@ -77,10 +77,13 @@ cp yq "$BIN"
 sudo mv yq /usr/local/bin/yq
 
 # ----- Validate Installed Version ---------------------------------------------
-if ! validate_version_match yq "$RAW_VERSION"; then
-  log_error "❌ yq installed but version check failed"
+actual_version="$(yq -V | grep -Eo 'v?[0-9]+\.[0-9]+\.[0-9]+')"
+expected_version="$RAW_VERSION"
+
+if [[ "$actual_version" == "$expected_version" || "$actual_version" == "v$expected_version" ]]; then
+  log_success "🎉 yq ${expected_version} installed successfully"
+else
+  log_error "❌ Installed yq version '$actual_version' does not match expected '$expected_version'"
   exit 1
 fi
-
-log_success "🎉 yq ${RAW_VERSION} installed successfully"
 
