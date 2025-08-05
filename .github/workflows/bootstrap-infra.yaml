@@ -161,7 +161,7 @@ jobs:
       # ────────────────────────────────────────────────────────────────────────────────
       - name: Flux bootstrap for environment(s) (debug)
         env:
-          FLUX_GITHUB_TOKEN: ${{ secrets.GITHUB_FLUX_SYSTEM_PAT }}
+          FLUX_GITHUB_TOKEN: ${{ secrets.FLUX_SYSTEM_PAT }}
           FLUX_LOG_LEVEL:    debug
         run: |
           set -xeuo pipefail
