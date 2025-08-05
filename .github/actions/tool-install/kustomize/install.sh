@@ -47,9 +47,11 @@ fi
 
 # ----- Download & Extract -----------------------------------------------------
 RAW_VERSION="$(grep "^${KEY}:" "$VERSIONS_FILE" | awk '{print $2}')"
-VERSION="$(echo "$RAW_VERSION" | sed 's/^v//')"  # removes leading 'v' if present
+VERSION="$(echo "$RAW_VERSION" | sed 's/^v//')"  # still useful if RAW is like v5.7.1
 
-URL="https://github.com/kubernetes-sigs/kustomize/releases/download/v${VERSION}/kustomize_v${VERSION}_${OS}_${ARCH}.tar.gz"
+ENCODED_VERSION="kustomize%2F${RAW_VERSION}"
+URL="https://github.com/kubernetes-sigs/kustomize/releases/download/${ENCODED_VERSION}/kustomize_${VERSION}_${OS}_${ARCH}.tar.gz"
+
 
 
 log_info "Downloading kustomize ${VERSION} for ${OS}/${ARCH}"
