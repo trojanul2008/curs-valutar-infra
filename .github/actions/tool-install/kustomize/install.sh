@@ -50,9 +50,7 @@ RAW_VERSION="$(grep "^${KEY}:" "$VERSIONS_FILE" | awk '{print $2}')"
 VERSION="$(echo "$RAW_VERSION" | sed 's/^v//')"  # still useful if RAW is like v5.7.1
 
 ENCODED_VERSION="kustomize%2F${RAW_VERSION}"
-URL="https://github.com/kubernetes-sigs/kustomize/releases/download/${ENCODED_VERSION}/kustomize_${VERSION}_${OS}_${ARCH}.tar.gz"
-
-
+URL="https://github.com/kubernetes-sigs/kustomize/releases/download/${ENCODED_VERSION}/kustomize_v${VERSION}_${OS}_${ARCH}.tar.gz"
 
 log_info "Downloading kustomize ${VERSION} for ${OS}/${ARCH}"
 log_info "URL: ${URL}"
