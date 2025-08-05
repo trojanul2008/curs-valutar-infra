@@ -151,11 +151,24 @@ jobs:
           for ITEM in "${NOT_FOUND[@]}";      do printf "| %-35s | ❌ Not Found |\n" "$ITEM"; done
           echo "🚦 Rollout check complete."
 
-      # 10.  Ensure flux-system namespace exists
+      # 10. Clean up any Flux CRDs stuck in Terminating
+      - name: Cleanup stuck Flux CRDs
+        run: |
+          # List the two CRDs and, if they exist, strip finalizers & force-delete them
+          for crd in kustomizations.kustomize.toolkit.fluxcd.io gitrepositories.source.toolkit.fluxcd.io; do
+            if kubectl get crd $crd &>/dev/null; then
+              echo "🗑️  Patching out finalizers on $crd"
+              kubectl patch crd $crd --type=merge -p '{"metadata":{"finalizers":[]}}'
+              echo "🗑️  Deleting CRD $crd"
+              kubectl delete crd $crd --ignore-not-found --wait=false --force --grace-period=0
+            fi
+          done
+
+      # 11.  Ensure flux-system namespace exists
       - name: Ensure flux-system namespace exists
         run: kubectl create namespace flux-system || echo "✔️ flux-system already exists"
 
-      # 11.  Flux bootstrap per environment
+      # 12.  Flux bootstrap per environment
       - name: Flux bootstrap for environment(s)
         run: |
           set -xeuo pipefail
@@ -177,6 +190,6 @@ jobs:
               --log-level=debug
           done
 
-      # 12.  Verify Flux reconciliation
+      # 13.  Verify Flux reconciliation
       - name: Verify Flux reconciliation
         run: flux get kustomizations --context=remote-cloudflare
