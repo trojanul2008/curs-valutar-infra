@@ -161,7 +161,6 @@ jobs:
       # ────────────────────────────────────────────────────────────────────────────────
       - name: Flux bootstrap for environment(s) (debug)
         env:
-          GITHUB_TOKEN:      ${{ secrets.GITHUB_FLUX_SYSTEM_PAT }}
           FLUX_GITHUB_TOKEN: ${{ secrets.GITHUB_FLUX_SYSTEM_PAT }}
           FLUX_LOG_LEVEL:    debug
         run: |
@@ -172,7 +171,6 @@ jobs:
               echo "✅ Already bootstrapped for '${ENV}' — skipping."
               continue
             fi
-      
             echo "🚀 Bootstrapping Flux for '${ENV}' (debug)…"
             flux bootstrap github \
               --context=remote-cloudflare \
@@ -181,7 +179,7 @@ jobs:
               --branch="${ENV}" \
               --path="infrastructure/flux/flux-system/manifests" \
               --personal \
-              --github-token-auth \
+              --token-auth \
               --log-level=debug
           done
       # ────────────────────────────────────────────────────────────────────────────────
