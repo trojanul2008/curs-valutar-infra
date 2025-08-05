@@ -22,7 +22,7 @@ VERSION="$(grep "^${KEY}:" "$VERSIONS_FILE" | awk '{print $2}')"
 ARCH="$(uname -m)"
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 
-case "$(uname -m)" in
+case "$ARCH" in
   x86_64|amd64) ARCH="amd64" ;;
   arm64|aarch64) ARCH="arm64" ;;
   *) log_error "Unsupported architecture: $(uname -m)"; exit 1 ;;
@@ -34,27 +34,27 @@ BIN="${CACHE}/kubeconform"
 
 # ----- Use Cached Binary if Available -----------------------------------------
 if [[ -f "$BIN" ]]; then
-  log_success "Cached kubeconform found at ${BIN}"
+  log_success "✅ Cached kubeconform found at ${BIN}"
   sudo cp "$BIN" /usr/local/bin/kubeconform
   if validate_version_match kubeconform "$VERSION"; then
-    log_success "kubeconform ${VERSION} activated from cache"
+    log_success "✅ kubeconform ${VERSION} activated from cache"
     exit 0
   else
-    log_error "Cached kubeconform version mismatch — redownloading"
+    log_error "⚠️ Cached kubeconform version mismatch — redownloading"
     rm -f "$BIN"
   fi
 fi
 
 # ----- Download & Extract -----------------------------------------------------
 URL="https://github.com/yannh/kubeconform/releases/download/${VERSION}/kubeconform-${OS}-${ARCH}.tar.gz"
-log_info "Downloading kubeconform ${VERSION} for ${OS}/${ARCH}"
-log_info "URL: ${URL}"
+log_info "⬇️  Downloading kubeconform ${VERSION} for ${OS}/${ARCH}"
+log_info "🔗 URL: ${URL}"
 
 TMPDIR="$(mktemp -d)"
 cd "$TMPDIR"
 
 if ! curl -sSL "$URL" | tar xz; then
-  log_error "Download or extraction failed for kubeconform"
+  log_error "❌ Download or extraction failed for kubeconform"
   exit 1
 fi
 
@@ -66,10 +66,12 @@ cp kubeconform "$BIN"
 sudo mv kubeconform /usr/local/bin/
 
 # ----- Validate Final Version -------------------------------------------------
-if ! validate_version_match kubeconform "$VERSION"; then
-  log_error "kubeconform installed but version check failed"
+actual_version="$(/usr/local/bin/kubeconform -v | grep -Eo 'v?[0-9]+\.[0-9]+\.[0-9]+')"
+expected_version="$VERSION"
+
+if [[ "$actual_version" == "$expected_version" || "$actual_version" == "v$expected_version" ]]; then
+  log_success "✅ kubeconform ${expected_version} installed successfully"
+else
+  log_error "❌ Installed kubeconform version '$actual_version' does not match expected '$expected_version'"
   exit 1
 fi
-
-log_success "kubeconform ${VERSION} installed successfully"
-
