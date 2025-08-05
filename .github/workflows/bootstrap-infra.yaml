@@ -161,9 +161,14 @@ jobs:
       # ────────────────────────────────────────────────────────────────────────────────
       - name: Ensure flux-system namespace exists
         run: kubectl create namespace flux-system || echo "✔️ flux-system already exists"
+      - name: Debug Flux token env
+        run: |
+          echo "→ GITHUB_TOKEN:    '$( [ -z "$GITHUB_TOKEN" ] && echo "<empty>" || echo "<present>" )'"
+          echo "→ FLUX_GITHUB_TOKEN: '$( [ -z "$FLUX_GITHUB_TOKEN" ] && echo "<empty>" || echo "<present>" )'"
+          printenv | grep -E 'GITHUB_TOKEN|FLUX_GITHUB_TOKEN'
       - name: Flux bootstrap for environment(s) (debug)
         env:
-          FLUX_GITHUB_TOKEN: ${{ secrets.FLUX_SYSTEM_PAT }}
+          GITHUB_TOKEN: ${{ secrets.FLUX_SYSTEM_PAT }}
           FLUX_LOG_LEVEL: debug
         run: |
           set -xeuo pipefail
@@ -182,7 +187,8 @@ jobs:
               --path="infrastructure/flux/flux-system/manifests" \
               --personal \
               --token-auth \
-              --log-level=debug
+              --log-level=debug \
+              --token "${GITHUB_TOKEN}"
           done
       # ────────────────────────────────────────────────────────────────────────────────
       # 10. Verify Flux reconciliation
