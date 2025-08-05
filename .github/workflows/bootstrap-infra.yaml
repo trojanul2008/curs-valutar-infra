@@ -91,12 +91,28 @@ jobs:
       # ────────────────────────────────────────────────────────────────────────────────
       - name: Install Kyverno (cluster-wide, idempotent)
         run: |
-          if ! kubectl get deploy -n kyverno kyverno 1>/dev/null 2>&1; then
-            echo "🚀 Installing Kyverno..."
-            kubectl create ns kyverno 2>/dev/null || true
-            kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/main/config/release/install.yaml
+          set -euo pipefail
+      
+          echo "📦 Adding Kyverno Helm repo..."
+          helm repo add kyverno https://kyverno.github.io/kyverno/ >/dev/null
+          helm repo update >/dev/null
+      
+          echo "🔧 Ensuring namespace 'kyverno' exists..."
+          kubectl create ns kyverno 2>/dev/null || echo "✔️ Namespace 'kyverno' already present"
+      
+          echo "🚀 Installing or upgrading Kyverno release..."
+          helm upgrade --install kyverno kyverno/kyverno \
+            --namespace kyverno \
+            --wait \
+            --timeout=120s \
+            >/dev/null
+      
+          echo "🔍 Verifying Kyverno deployment..."
+          if kubectl rollout status deployment/kyverno -n kyverno --timeout=60s; then
+            echo "🎉 Kyverno installed and running in 'kyverno' namespace"
           else
-            echo "✅ Kyverno already installed"
+            echo "❌ Kyverno deployment failed to start properly"
+            exit 1
           fi
       # ────────────────────────────────────────────────────────────────────────────────
       # 9.  Flux bootstrap per environment (skip if already done)
