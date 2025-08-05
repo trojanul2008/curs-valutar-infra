@@ -46,15 +46,27 @@ if [[ -f "$BIN" ]]; then
 fi
 
 # ----- Download & Extract -----------------------------------------------------
-# ----- Download ---------------------------------------------------------------
-URL="https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${VERSION}/kustomize_${VERSION}_${OS}_${ARCH}"
+URL="https://github.com/kubernetes-sigs/kustomize/releases/download/v${VERSION}/kustomize_v${VERSION}_${OS}_${ARCH}.tar.gz"
+
 log_info "Downloading kustomize ${VERSION} for ${OS}/${ARCH}"
 log_info "URL: ${URL}"
 
-curl -sSL -o kustomize "$URL"
-chmod +x kustomize
+curl -sSL -o kustomize.tar.gz "$URL"
+tar -xzf kustomize.tar.gz || { log_error "Failed to extract kustomize tarball"; exit 1; }
 
-# ----- Cache & Move -----------------------------------------------------------
+# ----- Post-Extraction: Verify & Move -----------------------------------------
+if ! [[ -f kustomize ]]; then
+  log_error "Extracted file 'kustomize' not found"
+  exit 1
+fi
+
+if ! file kustomize | grep -qi 'elf'; then
+  log_error "Downloaded file is not a valid ELF binary"
+  head -n 10 kustomize
+  exit 1
+fi
+
+chmod +x kustomize
 mkdir -p "$CACHE"
 cp kustomize "$BIN"
 sudo mv kustomize /usr/local/bin/kustomize
@@ -62,13 +74,8 @@ sudo mv kustomize /usr/local/bin/kustomize
 # ----- Validate Final Version -------------------------------------------------
 log_info "Raw kustomize version: $(kustomize version)"
 
-INSTALLED_VERSION="$(kustomize version | tr -d '[:space:]')"
-EXPECTED_VERSION="$(echo "$VERSION" | tr -d '[:space:]')"
-
-if [[ "$INSTALLED_VERSION" != "$EXPECTED_VERSION" ]]; then
-  log_error "Installed kustomize version '$INSTALLED_VERSION' does not match expected '$VERSION'"
+if validate_version_match kustomize "$VERSION"; then
+  log_success "kustomize ${VERSION} installed successfully"
+else
   exit 1
 fi
-
-log_success "kustomize ${VERSION} installed successfully"
-
