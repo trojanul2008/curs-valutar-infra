@@ -156,28 +156,30 @@ jobs:
       # ────────────────────────────────────────────────────────────────────────────────
       # 9.  Flux bootstrap per environment (skip if already done)
       # ────────────────────────────────────────────────────────────────────────────────
-      - name: Flux bootstrap for environment(s) (debug)
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_FLUX_SYSTEM_PAT }}
-          FLUX_LOG_LEVEL: debug
-        run: |
-          set -xeuo pipefail
-          for ENV in ${{ steps.envs.outputs.list }}; do
-            echo "⚡ Checking if Flux already bootstrapped for '${ENV}'..."
-            if kubectl get kustomization -n flux-system "${ENV}" &>/dev/null; then
-              echo "✅ Already bootstrapped for '${ENV}' — skipping."
-              continue
-            fi
-            echo "🚀 Bootstrapping Flux for '${ENV}' (debug)…"
-            flux bootstrap github \
-              --context=remote-cloudflare \
-              --owner="${OWNER}" \
-              --repository="${REPO}" \
-              --branch="${ENV}" \
-              --path="infrastructure/flux/flux-system/manifests" \
-              --personal \
-              --log-level=debug
-          done
+  - name: Flux bootstrap for environment(s) (debug)
+    env:
+      GITHUB_TOKEN:     ${{ secrets.GITHUB_FLUX_SYSTEM_PAT }}  # PAT with repo scope
+      FLUX_GITHUB_TOKEN: ${{ secrets.GITHUB_FLUX_SYSTEM_PAT }}  # ensure Flux v2+ picks it up
+      FLUX_LOG_LEVEL:   debug
+    run: |
+      set -xeuo pipefail
+      for ENV in ${{ steps.envs.outputs.list }}; do
+        echo "⚡ Checking if Flux already bootstrapped for '${ENV}'..."
+        if kubectl get kustomization -n flux-system "${ENV}" &>/dev/null; then
+          echo "✅ Already bootstrapped for '${ENV}' — skipping."
+          continue
+         fi
+         echo "🚀 Bootstrapping Flux for '${ENV}' (debug)…"
+         flux bootstrap github \
+           --context=remote-cloudflare \
+           --owner="${OWNER}" \
+           --repository="${REPO}" \
+           --branch="${ENV}" \
+           --path="infrastructure/flux/flux-system/manifests" \
+           --personal \
+           --token-auth       # non-interactive: read PAT from GITHUB_TOKEN env var
+           --log-level=debug  # verbose Flux logs
+       done
       # ────────────────────────────────────────────────────────────────────────────────
       # 10. Verify Flux reconciliation
       # ────────────────────────────────────────────────────────────────────────────────
