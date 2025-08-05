@@ -61,7 +61,7 @@ jobs:
       # ────────────────────────────────────────────────────────────────────────────────
       - name: Validate CLI version keys
         run: |
-          chmod +x ./scripts/utils/validate-version-keys.sh  
+          chmod +x ./scripts/utils/validate-version-keys.sh
           ./scripts/utils/validate-version-keys.sh
       # ────────────────────────────────────────────────────────────────────────────────
       # 5.  Install required CLI tooling
@@ -107,13 +107,13 @@ jobs:
       - name: Verify Kyverno components
         run: |
           for DEPLOY in kyverno-admission-controller kyverno-background-controller kyverno-cleanup-controller kyverno-reports-controller; do
-        echo "🔍 Checking rollout status of $DEPLOY..."
-        if ! kubectl rollout status deployment/$DEPLOY -n kyverno --timeout=60s; then
-          echo "❌ $DEPLOY failed to become ready"
-          exit 1
-        fi
-        kubectl get pods -n kyverno -o wide
-      done
+            echo "🔍 Checking rollout status of $DEPLOY..."
+            if ! kubectl rollout status deployment/$DEPLOY -n kyverno --timeout=60s; then
+              echo "❌ $DEPLOY failed to become ready"
+              exit 1
+            fi
+          done
+          kubectl get pods -n kyverno -o wide
       # ────────────────────────────────────────────────────────────────────────────────
       # 9.  Flux bootstrap per environment (skip if already done)
       # ────────────────────────────────────────────────────────────────────────────────
