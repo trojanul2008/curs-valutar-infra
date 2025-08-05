@@ -159,6 +159,8 @@ jobs:
       # ────────────────────────────────────────────────────────────────────────────────
       # 9.  Flux bootstrap per environment (skip if already done)
       # ────────────────────────────────────────────────────────────────────────────────
+      - name: Ensure flux-system namespace exists
+        run: kubectl create namespace flux-system || echo "✔️ flux-system already exists"
       - name: Flux bootstrap for environment(s) (debug)
         env:
           FLUX_GITHUB_TOKEN: ${{ secrets.FLUX_SYSTEM_PAT }}
