@@ -60,6 +60,7 @@ jobs:
           kubectl --kubeconfig ~/.kube/admin-config \
             config set-cluster default \
             --server=https://api.istartit.com:443
+            --insecure-skip-tls-verify=true
 
       - name: Grant teardown-admin to cloudflare-user
         run: |
