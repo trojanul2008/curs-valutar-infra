@@ -116,43 +116,47 @@ jobs:
           echo "✅ Namespaced wipe completed."
 
       - name: Wipe cluster-scoped resources
-        if: ${{ inputs.full == 'FULL' }}
         run: |
           set -euo pipefail
-
-          echo "🗑️ Deleting all CustomResourceDefinitions"
-          kubectl delete crd --all --ignore-not-found
-
-          echo "🗑️ Deleting non-default ClusterRoles"
+      
+          echo "🗑️ Deleting all CustomResourceDefinitions (60s timeout)"
+          kubectl delete crd --all --ignore-not-found --timeout=60s || true
+      
+          echo "🔍 Remaining CRDs after delete:"
+          kubectl get crd --no-headers || echo "(none)"
+      
+          echo "🗑️ Deleting non-default ClusterRoles/Bindings"
           DEFAULT_ROLES=(cluster-admin admin edit view)
-          for r in $(kubectl get clusterrole -o jsonpath='{.items[*].metadata.name}'); do
-            if [[ ! " ${DEFAULT_ROLES[*]} " =~ " ${r} " ]]; then
-              kubectl delete clusterrole "${r}" --ignore-not-found
-            fi
+          for r in $(kubectl get clusterrole -o name); do
+            name=${r#*/}
+            [[ " ${DEFAULT_ROLES[*]} " =~ " ${name} " ]] || kubectl delete clusterrole "$name" --ignore-not-found --timeout=30s
           done
-
-          echo "🗑️ Deleting non-default ClusterRoleBindings"
-          for b in $(kubectl get clusterrolebinding -o jsonpath='{.items[*].metadata.name}'); do
-            if [[ ! " ${DEFAULT_ROLES[*]} " =~ " ${b} " ]]; then
-              kubectl delete clusterrolebinding "${b}" --ignore-not-found
-            fi
+          for b in $(kubectl get clusterrolebinding -o name); do
+            name=${b#*/}
+            [[ " ${DEFAULT_ROLES[*]} " =~ " ${name} " ]] || kubectl delete clusterrolebinding "$name" --ignore-not-found --timeout=30s
           done
-
-          echo "🗑️ Deleting all MutatingWebhookConfigurations"
-          kubectl delete mutatingwebhookconfiguration --all --ignore-not-found
-
-          echo "🗑️ Deleting all ValidatingWebhookConfigurations"
-          kubectl delete validatingwebhookconfiguration --all --ignore-not-found
-
-          echo "🗑️ Deleting all APIService definitions"
-          kubectl delete apiservice --all --ignore-not-found
-
-          echo "🗑️ Deleting all PersistentVolumes"
-          kubectl delete pv --all --ignore-not-found
-
+      
+          echo "🔍 Remaining non-default ClusterRoles:"
+          kubectl get clusterrole | grep -vE '^(NAME|admin|edit|view|system:|k3s-)' || echo "(none)"
+      
+          echo "🗑️ Deleting all webhooks and APIService definitions (30s timeout)"
+          kubectl delete mutatingwebhookconfiguration,validatingwebhookconfiguration,apiservice --all --ignore-not-found --timeout=30s
+      
+          echo "🔍 Remaining webhooks/APIServices:"
+          kubectl get mutatingwebhookconfiguration,validatingwebhookconfiguration,apiservice -o name || echo "(none)"
+      
+          echo "🗑️ Deleting all PersistentVolumes (30s timeout)"
+          kubectl delete pv --all --ignore-not-found --timeout=30s
+      
+          echo "🔍 Remaining PVs:"
+          kubectl get pv -o name || echo "(none)"
+      
           echo "🗑️ Deleting non-default StorageClasses"
           kubectl get storageclass -o name \
             | grep -v 'local-path-storage' \
-            | xargs -r kubectl delete --ignore-not-found
-
+            | xargs -r kubectl delete --ignore-not-found --timeout=30s
+      
+          echo "🔍 Remaining StorageClasses:"
+          kubectl get storageclass -o name || echo "(none)"
+      
           echo "✅ Cluster-scoped wipe complete."
