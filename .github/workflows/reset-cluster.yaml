@@ -1,4 +1,4 @@
-name: "⚠️ Reset Cluster"
+name: "⚠️  Reset Cluster"
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ on:
         required: false
         default: ""
       full:
-        description: "Type FULL to also wipe cluster-scoped resources (CRDs, Roles, PVs, etc.)"
+        description: "Type FULL to also wipe cluster-scoped resources (CRDs, webhook configs, PVs, etc.)"
         required: false
         default: ""
 
@@ -57,7 +57,6 @@ jobs:
 
       - name: Patch admin-config to remote endpoint
         run: |
-          # your admin-config from k3s.yaml points at localhost:6443—rewrite it
           kubectl --kubeconfig ~/.kube/admin-config \
             config set-cluster default \
             --server=https://api.istartit.com:443
@@ -73,18 +72,26 @@ jobs:
       - name: Wipe namespaces
         run: |
           set -euo pipefail
+
           NS="${{ inputs.namespace }}"
+          FULL="${{ inputs.full }}"
           TARGETS=("$NS")
           [[ "$NS" == "both" ]] && TARGETS=(dev prod)
 
+          if [[ "$FULL" == "FULL" ]]; then
+            TARGETS+=(flux-system kyverno)
+          fi
+
+          echo "Deleting namespaces: ${TARGETS[*]}"
           for N in "${TARGETS[@]}"; do
             kubectl --kubeconfig ~/.kube/user-config delete ns "$N" \
               --ignore-not-found --wait=false
+
             for i in {1..30}; do
               sleep 2
               ! kubectl --kubeconfig ~/.kube/user-config get ns "$N" &>/dev/null && break
             done
-            # strip finalizers if it’s still terminating
+
             if kubectl --kubeconfig ~/.kube/user-config get ns "$N" &>/dev/null; then
               RAW=$(kubectl --kubeconfig ~/.kube/user-config get ns "$N" -o json)
               echo "$RAW" \
@@ -97,7 +104,14 @@ jobs:
       - name: Clean residual namespaced resources
         run: |
           NS="${{ inputs.namespace }}"
-          LIST=("$NS"); [[ "$NS" == "both" ]] && LIST=(dev prod)
+          FULL="${{ inputs.full }}"
+          LIST=("$NS")
+          [[ "$NS" == "both" ]] && LIST=(dev prod)
+
+          if [[ "$FULL" == "FULL" ]]; then
+            LIST+=(flux-system kyverno)
+          fi
+
           for N in "${LIST[@]}"; do
             for kind in $(kubectl --kubeconfig ~/.kube/user-config \
               api-resources --namespaced=true --verbs=list -o name); do
@@ -119,37 +133,29 @@ jobs:
         run: |
           set -euo pipefail
 
-          kubectl --kubeconfig ~/.kube/user-config delete crd \
-            --all --ignore-not-found --timeout=60s || true
+          echo "Deleting all CRDs except k3s-managed ones"
+          kubectl --kubeconfig ~/.kube/user-config get crd -o name \
+            | grep -v 'k3s.cattle.io' \
+            | xargs -r kubectl --kubeconfig ~/.kube/user-config delete \
+                --ignore-not-found --timeout=60s
 
-          # skip every system: and k3s- role/binding
-          DEFAULT="^(cluster-admin|admin|edit|view|system:|k3s-)"
-          for obj in clusterrole clusterrolebinding; do
-            for name in $(
-              kubectl --kubeconfig ~/.kube/user-config get "$obj" -o name
-            ); do
-              n=${name#*/}
-              if [[ ! "$n" =~ $DEFAULT ]]; then
-                kubectl --kubeconfig ~/.kube/user-config delete "$name" \
-                  --ignore-not-found --timeout=30s
-              fi
-            done
-          done
-
+          echo "Deleting webhook configurations"
           kubectl --kubeconfig ~/.kube/user-config delete \
-            mutatingwebhookconfiguration,validatingwebhookconfiguration,apiservice \
+            mutatingwebhookconfiguration,validatingwebhookconfiguration \
             --all --ignore-not-found --timeout=30s
 
+          echo "Deleting selected APIService definitions"
+          kubectl --kubeconfig ~/.kube/user-config get apiservice -o name \
+            | grep -E '(helm|traffic|kyverno)' \
+            | xargs -r kubectl --kubeconfig ~/.kube/user-config delete \
+                --ignore-not-found --timeout=30s
+
+          echo "Deleting all PersistentVolumes"
           kubectl --kubeconfig ~/.kube/user-config delete pv \
             --all --ignore-not-found --timeout=30s
 
+          echo "Deleting storageclasses except local-path-storage"
           kubectl --kubeconfig ~/.kube/user-config get storageclass -o name \
             | grep -v 'local-path-storage' \
             | xargs -r kubectl --kubeconfig ~/.kube/user-config delete \
                 --ignore-not-found --timeout=30s
-
-      - name: Cleanup teardown-admin binding
-        if: ${{ inputs.full == 'FULL' }}
-        run: |
-          kubectl --kubeconfig ~/.kube/admin-config delete \
-            clusterrolebinding teardown-admin --ignore-not-found || true
