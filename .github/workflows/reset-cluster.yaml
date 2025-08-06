@@ -11,41 +11,51 @@ on:
         description: "Type YES to confirm deletion (required for prod or both)"
         required: false
         default: ""
+      full:
+        description: "Type FULL to also wipe cluster-scoped resources (CRDs, Roles, PVs, etc.)"
+        required: false
+        default: ""
 
 jobs:
   wipe-cluster:
     runs-on: ubuntu-latest
+
     steps:
       - name: Validate inputs
         run: |
           NAMESPACE="${{ inputs.namespace }}"
           CONFIRM="${{ inputs.confirm }}"
+          FULL="${{ inputs.full }}"
 
-          echo "📍 Namespace selected: '${NAMESPACE}'"
+          echo "📍 Namespace: ${NAMESPACE}"
+          echo "📍 Full wipe?: ${FULL}"
 
-          if [[ "$NAMESPACE" == "prod" && "$CONFIRM" != "YES" ]]; then
-            echo "❌ Confirmation required to wipe production. Aborting."
+          if [[ "$NAMESPACE" =~ ^(prod|both)$ && "$CONFIRM" != "YES" ]]; then
+            echo "❌ Confirmation required to wipe prod or both. Aborting."
             exit 1
           fi
 
-          if [[ "$NAMESPACE" == "both" && "$CONFIRM" != "YES" ]]; then
-            echo "❌ Confirmation required to wipe BOTH namespaces. Aborting."
+          if [[ "$FULL" == "FULL" && "$CONFIRM" != "YES" ]]; then
+            echo "❌ Confirmation required for full cluster-scoped wipe. Aborting."
             exit 1
           fi
 
-          echo "✅ Wipe confirmed for '${NAMESPACE}'"
+          echo "✅ Inputs validated."
+
       - name: Restore kubeconfig
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > ~/.kube/config
           kubectl config use-context remote-cloudflare
           echo "🔑 Kubeconfig restored and context set."
+
       - name: Sanity check cluster connection
         run: |
           echo "🧠 Checking current context and cluster connectivity…"
           kubectl config current-context
           kubectl get ns
           echo "✅ Cluster access verified."
+
       - name: Wipe selected namespaces
         run: |
           set -euo pipefail
@@ -85,7 +95,8 @@ jobs:
               fi
             fi
           done
-      - name: Clean up residual resources
+
+      - name: Clean up residual namespaced resources
         run: |
           echo "🧹 Checking for remaining namespaced resources tied to '${{ inputs.namespace }}'"
 
@@ -102,4 +113,46 @@ jobs:
             done
           done
 
-          echo "✅ Wipe completed."
+          echo "✅ Namespaced wipe completed."
+
+      - name: Wipe cluster-scoped resources
+        if: ${{ inputs.full == 'FULL' }}
+        run: |
+          set -euo pipefail
+
+          echo "🗑️ Deleting all CustomResourceDefinitions"
+          kubectl delete crd --all --ignore-not-found
+
+          echo "🗑️ Deleting non-default ClusterRoles"
+          DEFAULT_ROLES=(cluster-admin admin edit view)
+          for r in $(kubectl get clusterrole -o jsonpath='{.items[*].metadata.name}'); do
+            if [[ ! " ${DEFAULT_ROLES[*]} " =~ " ${r} " ]]; then
+              kubectl delete clusterrole "${r}" --ignore-not-found
+            fi
+          done
+
+          echo "🗑️ Deleting non-default ClusterRoleBindings"
+          for b in $(kubectl get clusterrolebinding -o jsonpath='{.items[*].metadata.name}'); do
+            if [[ ! " ${DEFAULT_ROLES[*]} " =~ " ${b} " ]]; then
+              kubectl delete clusterrolebinding "${b}" --ignore-not-found
+            fi
+          done
+
+          echo "🗑️ Deleting all MutatingWebhookConfigurations"
+          kubectl delete mutatingwebhookconfiguration --all --ignore-not-found
+
+          echo "🗑️ Deleting all ValidatingWebhookConfigurations"
+          kubectl delete validatingwebhookconfiguration --all --ignore-not-found
+
+          echo "🗑️ Deleting all APIService definitions"
+          kubectl delete apiservice --all --ignore-not-found
+
+          echo "🗑️ Deleting all PersistentVolumes"
+          kubectl delete pv --all --ignore-not-found
+
+          echo "🗑️ Deleting non-default StorageClasses"
+          kubectl get storageclass -o name \
+            | grep -v 'local-path-storage' \
+            | xargs -r kubectl delete --ignore-not-found
+
+          echo "✅ Cluster-scoped wipe complete."
