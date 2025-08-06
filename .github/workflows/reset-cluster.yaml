@@ -1,4 +1,4 @@
-name: ⚠️ Reset Cluster
+name: "⚠️  Reset Cluster"
 
 on:
   workflow_dispatch:
@@ -20,8 +20,22 @@ jobs:
   wipe-cluster:
     runs-on: ubuntu-latest
 
+    # Paths where we’ll decode the two kubeconfigs
+    env:
+      CLOUD_KUBECONFIG: ${{ runner.temp }}/cloudflare.kubeconfig
+      ADMIN_KUBECONFIG: ${{ runner.temp }}/admin.kubeconfig
+
     steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
       - name: Validate inputs
+        shell: bash
         run: |
           NAMESPACE="${{ inputs.namespace }}"
           CONFIRM="${{ inputs.confirm }}"
@@ -42,121 +56,153 @@ jobs:
 
           echo "✅ Inputs validated."
 
-      - name: Restore kubeconfig
+      - name: Decode cloudflare-user kubeconfig
+        shell: bash
         run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > ~/.kube/config
-          kubectl config use-context remote-cloudflare
-          echo "🔑 Kubeconfig restored and context set."
+          mkdir -p "$(dirname "$CLOUD_KUBECONFIG")"
+          echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 --decode > "$CLOUD_KUBECONFIG"
+          chmod 600 "$CLOUD_KUBECONFIG"
+          echo "🔑 Cloudflare-user kubeconfig written to $CLOUD_KUBECONFIG"
 
-      - name: Sanity check cluster connection
+      - name: Decode admin kubeconfig
+        shell: bash
         run: |
-          echo "🧠 Checking current context and cluster connectivity…"
-          kubectl config current-context
-          kubectl get ns
-          echo "✅ Cluster access verified."
+          mkdir -p "$(dirname "$ADMIN_KUBECONFIG")"
+          echo "${{ secrets.ADMIN_KUBECONFIG }}" | base64 --decode > "$ADMIN_KUBECONFIG"
+          chmod 600 "$ADMIN_KUBECONFIG"
+          echo "🔑 Admin kubeconfig written to $ADMIN_KUBECONFIG"
+
+      - name: Sanity check access as cloudflare-user
+        shell: bash
+        run: |
+          echo "🧠 Verifying user-level access…"
+          kubectl --kubeconfig "$CLOUD_KUBECONFIG" get ns --no-headers
+          echo "✅ Cloudflare-user can list namespaces."
+
+      - name: Sanity check access as admin
+        shell: bash
+        run: |
+          echo "🧠 Verifying admin-level access…"
+          kubectl --kubeconfig "$ADMIN_KUBECONFIG" get ns --no-headers
+          echo "✅ Admin kubeconfig valid."
+
+      - name: Grant teardown-admin to cloudflare-user
+        shell: bash
+        run: |
+          echo "🔒 Granting cluster-admin to default:cloudflare-user"
+          kubectl --kubeconfig "$ADMIN_KUBECONFIG" create clusterrolebinding teardown-admin \
+            --clusterrole=cluster-admin \
+            --serviceaccount=default:cloudflare-user \
+            --dry-run=client -o yaml \
+            | kubectl --kubeconfig "$ADMIN_KUBECONFIG" apply -f -
 
       - name: Wipe selected namespaces
+        shell: bash
         run: |
           set -euo pipefail
           NAMESPACE="${{ inputs.namespace }}"
-
           if [[ "$NAMESPACE" == "both" ]]; then
-            TARGET_NAMESPACES=("dev" "prod")
+            TARGET_NAMESPACES=(dev prod)
           else
             TARGET_NAMESPACES=("$NAMESPACE")
           fi
 
           for NS in "${TARGET_NAMESPACES[@]}"; do
-            echo "🔄 Starting full wipe of namespace '${NS}'"
-            kubectl delete ns "${NS}" --wait=false --ignore-not-found
-            echo "⏳ Waiting for deletion of '${NS}' (up to 60s)…"
+            echo "🔄 Deleting namespace: $NS"
+            kubectl --kubeconfig "$CLOUD_KUBECONFIG" delete ns "$NS" --wait=false --ignore-not-found
 
+            echo "⏳ Waiting up to 60s for $NS to vanish…"
             for i in {1..30}; do
               sleep 2
-              kubectl get ns "${NS}" &>/dev/null || {
-                echo "✅ Namespace '${NS}' deleted."
+              if ! kubectl --kubeconfig "$CLOUD_KUBECONFIG" get ns "$NS" &>/dev/null; then
+                echo "✅ $NS gone."
                 break
-              }
+              fi
               echo "  …still terminating"
             done
 
-            if kubectl get ns "${NS}" &>/dev/null; then
-              echo "⚠️ Namespace '${NS}' stuck in Terminating — inspecting finalizers"
-              RAW_NS_JSON=$(kubectl get ns "${NS}" -o json || echo "")
-              if [[ -n "${RAW_NS_JSON}" ]]; then
-                echo "🔧 Removing finalizers from '${NS}'"
-                echo "${RAW_NS_JSON}" \
-                  | jq 'del(.spec.finalizers)' \
-                  | kubectl replace --raw "/api/v1/namespaces/${NS}/finalize" -f -
-                echo "🗑️ Namespace '${NS}' forced-deleted."
+            if kubectl --kubeconfig "$CLOUD_KUBECONFIG" get ns "$NS" &>/dev/null; then
+              echo "⚠️ $NS stuck in Terminating; stripping finalizers"
+              RAW="$(kubectl --kubeconfig "$CLOUD_KUBECONFIG" get ns "$NS" -o json || true)"
+              if [[ -n "$RAW" ]]; then
+                echo "$RAW" | jq 'del(.spec.finalizers)' \
+                  | kubectl --kubeconfig "$CLOUD_KUBECONFIG" replace --raw "/api/v1/namespaces/$NS/finalize" -f -
+                echo "🗑️ $NS forced-deleted."
               else
-                echo "❌ Unable to retrieve JSON for '${NS}'. Skipping finalizer removal."
+                echo "❌ Could not fetch JSON for $NS"
               fi
             fi
           done
 
       - name: Clean up residual namespaced resources
+        shell: bash
         run: |
-          echo "🧹 Checking for remaining namespaced resources tied to '${{ inputs.namespace }}'"
-
-          if [[ "${{ inputs.namespace }}" == "both" ]]; then
-            NS_LIST=("dev" "prod")
+          echo "🧹 Removing leftover namespaced objects"
+          NAMESPACE="${{ inputs.namespace }}"
+          if [[ "$NAMESPACE" == "both" ]]; then
+            NS_LIST=(dev prod)
           else
-            NS_LIST=("${{ inputs.namespace }}")
+            NS_LIST=("$NAMESPACE")
           fi
 
           for NS in "${NS_LIST[@]}"; do
-            for kind in $(kubectl api-resources --namespaced=true --verbs=list -o name); do
-              echo "  • Removing ${kind} in '${NS}'"
-              kubectl delete "$kind" -n "${NS}" --all --wait --ignore-not-found || true
+            for kind in $(kubectl --kubeconfig "$CLOUD_KUBECONFIG" api-resources --namespaced=true --verbs=list -o name); do
+              echo "  • Deleting $kind in $NS"
+              kubectl --kubeconfig "$CLOUD_KUBECONFIG" delete "$kind" -n "$NS" --all --ignore-not-found || true
             done
           done
+          echo "✅ Namespaced wipe complete."
 
-          echo "✅ Namespaced wipe completed."
+      - name: Strip finalizers on stuck CRDs
+        if: ${{ inputs.full == 'FULL' }}
+        shell: bash
+        run: |
+          echo "✂️ Removing finalizers from CRDs"
+          for crd in $(kubectl --kubeconfig "$CLOUD_KUBECONFIG" get crd -o name); do
+            kubectl --kubeconfig "$CLOUD_KUBECONFIG" patch "$crd" --type=merge -p '{"metadata":{"finalizers":[]}}' || true
+          done
 
       - name: Wipe cluster-scoped resources
+        if: ${{ inputs.full == 'FULL' }}
+        shell: bash
         run: |
           set -euo pipefail
-      
-          echo "🗑️ Deleting all CustomResourceDefinitions (60s timeout)"
-          kubectl delete crd --all --ignore-not-found --timeout=60s || true
-      
-          echo "🔍 Remaining CRDs after delete:"
-          kubectl get crd --no-headers || echo "(none)"
-      
-          echo "🗑️ Deleting non-default ClusterRoles/Bindings"
-          DEFAULT_ROLES=(cluster-admin admin edit view)
-          for r in $(kubectl get clusterrole -o name); do
+
+          echo "🗑️ Deleting all CRDs"
+          kubectl --kubeconfig "$CLOUD_KUBECONFIG" delete crd --all --ignore-not-found --timeout=60s || true
+          echo "🔍 Remaining CRDs:"
+          kubectl --kubeconfig "$CLOUD_KUBECONFIG" get crd -o name || echo "(none)"
+
+          echo "🗑️ Cleaning up ClusterRoles & Bindings"
+          DEFAULT=(cluster-admin admin edit view)
+          for r in $(kubectl --kubeconfig "$CLOUD_KUBECONFIG" get clusterrole -o name); do
             name=${r#*/}
-            [[ " ${DEFAULT_ROLES[*]} " =~ " ${name} " ]] || kubectl delete clusterrole "$name" --ignore-not-found --timeout=30s
+            [[ " ${DEFAULT[*]} " =~ " $name " ]] || \
+              kubectl --kubeconfig "$CLOUD_KUBECONFIG" delete clusterrole "$name" --ignore-not-found --timeout=30s
           done
-          for b in $(kubectl get clusterrolebinding -o name); do
+          for b in $(kubectl --kubeconfig "$CLOUD_KUBECONFIG" get clusterrolebinding -o name); do
             name=${b#*/}
-            [[ " ${DEFAULT_ROLES[*]} " =~ " ${name} " ]] || kubectl delete clusterrolebinding "$name" --ignore-not-found --timeout=30s
+            [[ " ${DEFAULT[*]} " =~ " $name " ]] || \
+              kubectl --kubeconfig "$CLOUD_KUBECONFIG" delete clusterrolebinding "$name" --ignore-not-found --timeout=30s
           done
-      
-          echo "🔍 Remaining non-default ClusterRoles:"
-          kubectl get clusterrole | grep -vE '^(NAME|admin|edit|view|system:|k3s-)' || echo "(none)"
-      
-          echo "🗑️ Deleting all webhooks and APIService definitions (30s timeout)"
-          kubectl delete mutatingwebhookconfiguration,validatingwebhookconfiguration,apiservice --all --ignore-not-found --timeout=30s
-      
-          echo "🔍 Remaining webhooks/APIServices:"
-          kubectl get mutatingwebhookconfiguration,validatingwebhookconfiguration,apiservice -o name || echo "(none)"
-      
-          echo "🗑️ Deleting all PersistentVolumes (30s timeout)"
-          kubectl delete pv --all --ignore-not-found --timeout=30s
-      
-          echo "🔍 Remaining PVs:"
-          kubectl get pv -o name || echo "(none)"
-      
+
+          echo "🗑️ Deleting webhooks & APIs"
+          kubectl --kubeconfig "$CLOUD_KUBECONFIG" delete mutatingwebhookconfiguration,validatingwebhookconfiguration,apiservice \
+            --all --ignore-not-found --timeout=30s
+
+          echo "🗑️ Deleting PersistentVolumes"
+          kubectl --kubeconfig "$CLOUD_KUBECONFIG" delete pv --all --ignore-not-found --timeout=30s
+
           echo "🗑️ Deleting non-default StorageClasses"
-          kubectl get storageclass -o name \
+          kubectl --kubeconfig "$CLOUD_KUBECONFIG" get storageclass -o name \
             | grep -v 'local-path-storage' \
-            | xargs -r kubectl delete --ignore-not-found --timeout=30s
-      
-          echo "🔍 Remaining StorageClasses:"
-          kubectl get storageclass -o name || echo "(none)"
-      
+            | xargs -r kubectl --kubeconfig "$CLOUD_KUBECONFIG" delete --ignore-not-found --timeout=30s
+
           echo "✅ Cluster-scoped wipe complete."
+
+      - name: Cleanup temporary binding
+        if: ${{ inputs.full == 'FULL' }}
+        shell: bash
+        run: |
+          echo "🧹 Removing teardown-admin binding"
+          kubectl --kubeconfig "$ADMIN_KUBECONFIG" delete clusterrolebinding teardown-admin --ignore-not-found || true
