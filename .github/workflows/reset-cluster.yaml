@@ -55,7 +55,7 @@ jobs:
             | base64 --decode > ~/.kube/admin-config
           chmod 600 ~/.kube/user-config ~/.kube/admin-config
 
-      - name: Patch admin-config to remote endpoint
+      - name: Patch admin-config to skip TLS verify
         run: |
           kubectl --kubeconfig ~/.kube/admin-config \
             config set-cluster default \
@@ -68,7 +68,7 @@ jobs:
             --clusterrole=cluster-admin \
             --serviceaccount=default:cloudflare-user \
             --dry-run=client -o yaml \
-          | kubectl --kubeconfig ~/.kube/admin-config apply -f -
+          | kubectl --kubeconfig ~/.kube/admin-config apply --validate=false -f -
 
       - name: Wipe namespaces
         run: |
