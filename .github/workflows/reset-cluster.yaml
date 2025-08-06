@@ -1,4 +1,4 @@
-name: ⚠️ Reset Cluster
+name: "⚠️ Reset Cluster"
 
 on:
   workflow_dispatch:
@@ -53,18 +53,24 @@ jobs:
 
           echo "✅ Inputs are valid."
 
-      - name: Prepare kubeconfigs
+      - name: Decode kubeconfigs
         run: |
           mkdir -p ~/.kube
 
-          echo "${{ secrets.KUBE_CONFIG_DATA }}" \
-            | base64 --decode > ~/.kube/user-config
+          # Cloudflare-user config
+          echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 --decode > ~/.kube/user-config
+          chmod 600 ~/.kube/user-config
 
-          echo "${{ secrets.ADMIN_KUBECONFIG }}" \
-            | base64 --decode > ~/.kube/admin-config
+          # Admin config
+          echo "${{ secrets.ADMIN_KUBECONFIG }}" | base64 --decode > ~/.kube/admin-config
+          chmod 600 ~/.kube/admin-config
 
-          chmod 600 ~/.kube/user-config ~/.kube/admin-config
-          echo "🔑 Kubeconfigs decoded to ~/.kube/"
+          echo "🔑 Decoded both kubeconfigs to ~/.kube/"
+
+      - name: Set user-config context to remote-cloudflare
+        run: |
+          kubectl --kubeconfig ~/.kube/user-config config use-context remote-cloudflare
+          echo "🔧 user-config now pointing at remote-cloudflare"
 
       - name: Sanity check user access
         run: |
@@ -73,7 +79,7 @@ jobs:
 
       - name: Sanity check admin access
         run: |
-          echo "🧠 Verifying admin permissions…"
+          echo "🧠 Verifying admin-level permissions…"
           kubectl --kubeconfig ~/.kube/admin-config get ns --no-headers
 
       - name: Grant teardown-admin to cloudflare-user
@@ -88,8 +94,8 @@ jobs:
       - name: Wipe selected namespaces
         run: |
           set -euo pipefail
-          NS="${{ inputs.namespace }}"
 
+          NS="${{ inputs.namespace }}"
           if [[ "${NS}" == "both" ]]; then
             TARGETS=(dev prod)
           else
@@ -104,13 +110,15 @@ jobs:
             echo "⏳ Waiting up to 60s for ${N} to terminate…"
             for i in {1..30}; do
               sleep 2
-              kubectl --kubeconfig ~/.kube/user-config get ns "${N}" &>/dev/null \
-                || { echo "✅ ${N} deleted."; break; }
+              if ! kubectl --kubeconfig ~/.kube/user-config get ns "${N}" &>/dev/null; then
+                echo "✅ ${N} deleted."
+                break
+              fi
               echo "  …still terminating"
             done
 
             if kubectl --kubeconfig ~/.kube/user-config get ns "${N}" &>/dev/null; then
-              echo "⚠️ ${N} stuck—removing finalizers"
+              echo "⚠️ ${N} stuck—stripping finalizers"
               RAW=$(kubectl --kubeconfig ~/.kube/user-config get ns "${N}" -o json || true)
               if [[ -n "${RAW}" ]]; then
                 echo "${RAW}" \
@@ -144,14 +152,13 @@ jobs:
             done
           done
 
-      - name: Strip CRD finalizers
+      - name: Strip finalizers on stuck CRDs
         if: ${{ inputs.full == 'FULL' }}
         run: |
-          echo "✂️ Removing finalizers from CRDs"
+          echo "✂️ Removing CRD finalizers"
           for crd in $(kubectl --kubeconfig ~/.kube/user-config get crd -o name); do
             kubectl --kubeconfig ~/.kube/user-config patch "${crd}" \
-              --type=merge -p '{"metadata":{"finalizers":[]}}' \
-              || true
+              --type=merge -p '{"metadata":{"finalizers":[]}}' || true
           done
 
       - name: Wipe cluster-scoped resources
@@ -163,7 +170,7 @@ jobs:
           kubectl --kubeconfig ~/.kube/user-config delete crd \
             --all --ignore-not-found --timeout=60s || true
 
-          echo "🗑️ Cleaning ClusterRoles & Bindings"
+          echo "🗑️ Cleaning up ClusterRoles & Bindings"
           DEFAULT=(cluster-admin admin edit view)
           for r in $(kubectl --kubeconfig ~/.kube/user-config get clusterrole -o name); do
             n=${r#*/}
@@ -171,7 +178,6 @@ jobs:
               kubectl --kubeconfig ~/.kube/user-config delete "${r}" \
                 --ignore-not-found --timeout=30s
           done
-
           for b in $(kubectl --kubeconfig ~/.kube/user-config get clusterrolebinding -o name); do
             n=${b#*/}
             [[ " ${DEFAULT[*]} " =~ " ${n} " ]] || \
@@ -179,7 +185,7 @@ jobs:
                 --ignore-not-found --timeout=30s
           done
 
-          echo "🗑️ Deleting webhooks & APIService"
+          echo "🗑️ Deleting webhooks & APIService definitions"
           kubectl --kubeconfig ~/.kube/user-config delete \
             mutatingwebhookconfiguration,validatingwebhookconfiguration,apiservice \
             --all --ignore-not-found --timeout=30s
