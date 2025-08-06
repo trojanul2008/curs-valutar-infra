@@ -1,12 +1,10 @@
 apiVersion: source.toolkit.fluxcd.io/v1beta2
 kind: GitRepository
 metadata:
-  name: infra-prod
+  name: infra-dev
   namespace: flux-system
 spec:
   interval: 1m
   url: https://github.com/trojanul2008/curs-valutar-infra.git
   ref:
-    branch: prod
-  secretRef:
-    name: flux-system
+    branch: dev

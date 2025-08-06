@@ -5,8 +5,8 @@ metadata:
   namespace: flux-system
 spec:
   interval: 10m
-  path: ./infrastructure/flux/flux-system
+  path: ./infrastructure/flux/flux-system/manifests
   prune: true
   sourceRef:
     kind: GitRepository
-    name: flux-system
+    name: infra-prod

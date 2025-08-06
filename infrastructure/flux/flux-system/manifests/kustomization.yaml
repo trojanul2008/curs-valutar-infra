@@ -5,16 +5,18 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1m
-  path: ./infrastructure/flux/flux-system
   prune: true
   sourceRef:
     kind: GitRepository
-    name: flux-system
+    name: infra-prod
   resources:
-    - gotk-sync.yaml
+    - gotk-sync.yaml              # infra-prod
+    - gotk-components.yaml        # Kustomization of Flux controllers
     - image-repository.yaml
     - image-policy-dev.yaml
     - image-policy.yaml
     - image-update-automation-dev.yaml
     - image-update-automation.yaml
+    - source-dev.yaml             # infra-dev
+    - external-secrets-install.yaml
     - app-kustomization.yaml
