@@ -23,13 +23,11 @@ jobs:
     env:
       OWNER: trojanul2008
       REPO: curs-valutar-infra
-
-      # wire your PAT into both GITHUB_TOKEN (for actions) and FLUX_GITHUB_TOKEN (for flux --token-auth)
       GITHUB_TOKEN: ${{ secrets.FLUX_SYSTEM_PAT }}
       FLUX_GITHUB_TOKEN: ${{ secrets.FLUX_SYSTEM_PAT }}
 
     steps:
-      # 1.  Validate dispatch input (guardrail for prod / both)
+      # 1. Validate dispatch input
       - name: Validate input
         id: validate
         run: |
@@ -47,17 +45,17 @@ jobs:
           fi
           echo "target=${TARGET}" >> "$GITHUB_OUTPUT"
 
-      # 2.  Checkout repository
+      # 2. Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 3.  Debug token presence (ensure the PAT is injected)
+      # 3. Debug token presence
       - name: Debug token presence
         run: |
           echo "→ GITHUB_TOKEN present?      $( [ -z \"$GITHUB_TOKEN\" ] && echo no || echo yes )"
           echo "→ FLUX_GITHUB_TOKEN present? $( [ -z \"$FLUX_GITHUB_TOKEN\" ] && echo no || echo yes )"
 
-      # 4.  Restore kubeconfig & verify access
+      # 4. Restore kubeconfig & verify access
       - name: Restore kubeconfig
         run: |
           mkdir -p ~/.kube
@@ -67,17 +65,17 @@ jobs:
       - name: Verify cluster access
         run: kubectl get nodes
 
-      # 5.  Validate CLI version keys
+      # 5. Validate CLI version keys
       - name: Validate CLI version keys
         run: |
           chmod +x ./scripts/utils/validate-version-keys.sh
           ./scripts/utils/validate-version-keys.sh
 
-      # 6.  Install required CLI tooling
+      # 6. Install required CLI tooling
       - name: Install CLI tools
         uses: ./.github/actions/tool-install
 
-      # 7.  Figure out which environments to bootstrap
+      # 7. Set target environments
       - name: Set target environments
         id: envs
         run: |
@@ -88,7 +86,7 @@ jobs:
             echo "list=${TARGET}" >> "$GITHUB_OUTPUT"
           fi
 
-      # 8.  Ensure target namespaces exist
+      # 8. Ensure target namespaces exist
       - name: Create target namespaces
         run: |
           for NS in ${{ steps.envs.outputs.list }}; do
@@ -96,7 +94,7 @@ jobs:
             kubectl create ns "${NS}" 2>/dev/null || echo "✔️  Namespace '${NS}' already present"
           done
 
-      # 9.  Install Kyverno (cluster-wide, idempotent)
+      # 9. Install Kyverno
       - name: Install Kyverno
         run: |
           set -euo pipefail
@@ -146,15 +144,28 @@ jobs:
           echo "📊 Kyverno Rollout Summary:"
           printf "| %-35s | %-10s |\n" "Component" "Status"
           printf "|%s|%s|\n" "$(printf '%.0s-' {1..37})" "$(printf '%.0s-' {1..12})"
-          for ITEM in "${SUCCESS[@]}";        do printf "| %-35s | ✅ Success   |\n" "$ITEM"; done
-          for ITEM in "${TIMEOUT[@]}";        do printf "| %-35s | ⚠️ Timeout   |\n" "$ITEM"; done
-          for ITEM in "${NOT_FOUND[@]}";      do printf "| %-35s | ❌ Not Found |\n" "$ITEM"; done
+          for ITEM in "${SUCCESS[@]}";   do printf "| %-35s | ✅ Success   |\n" "$ITEM"; done
+          for ITEM in "${TIMEOUT[@]}";   do printf "| %-35s | ⚠️ Timeout   |\n" "$ITEM"; done
+          for ITEM in "${NOT_FOUND[@]}"; do printf "| %-35s | ❌ Not Found |\n" "$ITEM"; done
           echo "🚦 Rollout check complete."
 
-      # 10. Clean up any Flux CRDs stuck in Terminating
+      # 10. Install Traefik
+      - name: Install Traefik
+        run: |
+          set -euo pipefail
+          helm repo add traefik https://helm.traefik.io/traefik
+          helm repo update
+          kubectl create ns traefik 2>/dev/null || echo "✔️ Namespace 'traefik' already present"
+          helm upgrade --install traefik traefik/traefik \
+            --namespace traefik \
+            --version 2.10.3 \
+            --set additionalArguments="{--providers.kubernetescrd}" \
+            --wait \
+            --timeout=300s
+
+      # 11. Clean up any Flux CRDs stuck in Terminating
       - name: Cleanup stuck Flux CRDs
         run: |
-          # List the two CRDs and, if they exist, strip finalizers & force-delete them
           for crd in kustomizations.kustomize.toolkit.fluxcd.io gitrepositories.source.toolkit.fluxcd.io; do
             if kubectl get crd $crd &>/dev/null; then
               echo "🗑️  Patching out finalizers on $crd"
@@ -164,11 +175,11 @@ jobs:
             fi
           done
 
-      # 11.  Ensure flux-system namespace exists
+      # 12. Ensure flux-system namespace exists
       - name: Ensure flux-system namespace exists
         run: kubectl create namespace flux-system || echo "✔️ flux-system already exists"
 
-      # 12.  Flux bootstrap per environment
+      # 13. Flux bootstrap per environment
       - name: Flux bootstrap for environment(s)
         run: |
           set -xeuo pipefail
@@ -190,6 +201,6 @@ jobs:
               --log-level=debug
           done
 
-      # 13.  Verify Flux reconciliation
+      # 14. Verify Flux reconciliation
       - name: Verify Flux reconciliation
         run: flux get kustomizations --context=remote-cloudflare
