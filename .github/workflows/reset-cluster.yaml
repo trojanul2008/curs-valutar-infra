@@ -45,16 +45,32 @@ jobs:
       - name: Decode & merge kubeconfigs
         run: |
           mkdir -p ~/.kube
-          # Decode remote-cloudflare
+          if [[ -z "${{ secrets.KUBE_CONFIG_CLOUDFLARE }}" ]]; then
+            echo "❌ Missing KUBE_CONFIG_CLOUDFLARE secret"; exit 1
+          fi
+          if [[ -z "${{ secrets.K3S_ADMIN_KUBECONFIG }}" ]]; then
+            echo "❌ Missing K3S_ADMIN_KUBECONFIG secret"; exit 1
+          fi
           echo "${{ secrets.KUBE_CONFIG_CLOUDFLARE }}" \
             | base64 --decode > ~/.kube/remote-config
-          # Decode k3s-admin
           echo "${{ secrets.K3S_ADMIN_KUBECONFIG }}" \
             | base64 --decode > ~/.kube/admin-config
-          # Merge into one flat config
           KUBECONFIG=~/.kube/remote-config:~/.kube/admin-config \
             kubectl config view --flatten > ~/.kube/config
           chmod 600 ~/.kube/config
+          #      - name: Decode & merge kubeconfigs
+          #        run: |
+          #          mkdir -p ~/.kube
+          #          # Decode remote-cloudflare
+          #          echo "${{ secrets.KUBE_CONFIG_CLOUDFLARE }}" \
+          #            | base64 --decode > ~/.kube/remote-config
+          #          # Decode k3s-admin
+          #          echo "${{ secrets.K3S_ADMIN_KUBECONFIG }}" \
+          #            | base64 --decode > ~/.kube/admin-config
+          #          # Merge into one flat config
+          #          KUBECONFIG=~/.kube/remote-config:~/.kube/admin-config \
+          #            kubectl config view --flatten > ~/.kube/config
+          #          chmod 600 ~/.kube/config
       - name: Debug show all contexts
         run: |
           echo "--- kubectl config view ---"
