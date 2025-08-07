@@ -59,7 +59,10 @@ jobs:
             | base64 --decode > ~/.kube/remote-config
           echo "${{ secrets.K3S_ADMIN_KUBECONFIG }}" \
             | base64 --decode > ~/.kube/admin-config
-
+      - name: Debug secret lengths
+        run: |
+          echo -n "admin config bytes: "; echo -n "${{ secrets.K3S_ADMIN_KUBECONFIG }}" | wc -c
+          echo -n "remote config bytes: "; echo -n "${{ secrets.KUBE_CONFIG_CLOUDFLARE }}"   | wc -c
       - name: Expose merged KUBECONFIG for all steps
         run: |
           # This makes kubectl read both files (and any contexts they define)
