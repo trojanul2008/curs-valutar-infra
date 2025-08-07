@@ -55,20 +55,29 @@ jobs:
             | base64 --decode > ~/.kube/admin-config
           chmod 600 ~/.kube/user-config ~/.kube/admin-config
 
-      - name: Patch admin-config to skip TLS verify
+      - name: Skip TLS verify in admin-config
         run: |
+          # Grab the real cluster name from the file
+          CLUSTER_NAME=$(
+            kubectl --kubeconfig ~/.kube/admin-config \
+              config view -o jsonpath='{.clusters[0].name}'
+          )
+
+          # Flip on insecure-skip-tls-verify for that cluster
           kubectl --kubeconfig ~/.kube/admin-config \
-            config set-cluster default \
-            --server=https://api.istartit.com:443 \
-            --insecure-skip-tls-verify=true
+            config set-cluster "$CLUSTER_NAME" \
+              --insecure-skip-tls-verify=true
 
       - name: Grant teardown-admin to cloudflare-user
         run: |
-          kubectl --kubeconfig ~/.kube/admin-config create clusterrolebinding teardown-admin \
-            --clusterrole=cluster-admin \
-            --serviceaccount=default:cloudflare-user \
-            --dry-run=client -o yaml \
-          | kubectl --kubeconfig ~/.kube/admin-config apply --validate=false -f -
+          # Render the CRB YAML and apply it without doing an openapi fetch
+          kubectl --kubeconfig ~/.kube/admin-config \
+            create clusterrolebinding teardown-admin \
+              --clusterrole=cluster-admin \
+              --serviceaccount=default:cloudflare-user \
+              --dry-run=client -o yaml \
+          | kubectl --kubeconfig ~/.kube/admin-config \
+              apply --validate=false -f -
 
       - name: Wipe namespaces
         run: |
@@ -137,7 +146,7 @@ jobs:
           echo "Deleting all CRDs except k3s-managed ones"
           kubectl --kubeconfig ~/.kube/user-config get crd -o name \
             | grep -v 'k3s.cattle.io' \
-            | xargs -r kubectl --kubeconfig ~/.kube/user-config delete \
+            | xargs -r kubectl --kubeconfig ~/..kube/user-config delete \
                 --ignore-not-found --timeout=60s
 
           echo "Deleting webhook configurations"
@@ -158,5 +167,12 @@ jobs:
           echo "Deleting storageclasses except local-path-storage"
           kubectl --kubeconfig ~/.kube/user-config get storageclass -o name \
             | grep -v 'local-path-storage' \
-            | xargs -r kubectl --kubeconfig ~/.kube/user-config delete \
+            | xargs -r kubectl --kubeconfig ~/..kube/user-config delete \
                 --ignore-not-found --timeout=30s
+
+      - name: Cleanup teardown-admin binding
+        if: always()
+        run: |
+          kubectl --kubeconfig ~/.kube/admin-config delete \
+            clusterrolebinding teardown-admin \
+            --ignore-not-found
