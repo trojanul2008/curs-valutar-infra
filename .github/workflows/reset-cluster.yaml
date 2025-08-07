@@ -1,4 +1,4 @@
-name: "⚠️  Reset Cluster"
+name: "⚠️  Reset Cluster "
 
 on:
   workflow_dispatch:
