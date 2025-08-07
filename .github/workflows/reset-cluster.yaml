@@ -63,11 +63,11 @@ jobs:
         run: |
           echo -n "admin config bytes: "; echo -n "${{ secrets.K3S_ADMIN_KUBECONFIG }}" | wc -c
           echo -n "remote config bytes: "; echo -n "${{ secrets.KUBE_CONFIG_CLOUDFLARE }}"   | wc -c
+
       - name: Expose merged KUBECONFIG for all steps
         run: |
-          # This makes kubectl read both files (and any contexts they define)
-          echo "KUBECONFIG=~/.kube/remote-config:~/.kube/admin-config" >> $GITHUB_ENV
-        # From now on, every kubectl command automatically sees both configs.
+          # Use $HOME instead of ~ so GitHub Actions expands it properly
+          echo "KUBECONFIG=$HOME/.kube/remote-config:$HOME/.kube/admin-config" >> $GITHUB_ENV
 
       - name: Debug show all contexts
         run: |
