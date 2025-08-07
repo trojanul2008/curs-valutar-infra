@@ -21,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       KUBECONFIG: $HOME/.kube/config
+      ADMIN_CTX: k3s-admin
 
     steps:
       - name: Checkout repo
@@ -47,8 +48,12 @@ jobs:
           echo "${{ secrets.KUBE_CONFIG }}" \
             | base64 --decode > ~/.kube/config
           chmod 600 ~/.kube/config
-      - name: (Debug) List contexts
-        run: kubectl config get-contexts -o name
+      - name: Debug show all contexts
+        run: |
+          echo "--- kubectl config view ---"
+          kubectl config view --minify=false
+          echo "--- available contexts ---"
+          kubectl config get-contexts -o name
       - name: Patch remote cluster entry & skip TLS verify
         run: |
           kubectl --context=remote-cloudflare config set-cluster remote \
@@ -56,12 +61,11 @@ jobs:
             --insecure-skip-tls-verify=true
       - name: Grant teardown-admin to cloudflare-user
         run: |
-          # <<— note we use k3s-admin here, not remote-cloudflare
-          kubectl --context=k3s-admin create clusterrolebinding teardown-admin \
+          kubectl --context=${{ env.ADMIN_CTX }} create clusterrolebinding teardown-admin \
             --clusterrole=cluster-admin \
             --serviceaccount=default:cloudflare-user \
             --dry-run=client -o yaml \
-          | kubectl --context=k3s-admin apply -f -
+          | kubectl --context=${{ env.ADMIN_CTX }} apply -f -
       - name: Wipe namespaces
         run: |
           set -euo pipefail
@@ -136,5 +140,5 @@ jobs:
       - name: Cleanup teardown-admin binding
         if: always()
         run: |
-          kubectl --context=k3s-admin delete clusterrolebinding teardown-admin \
+          kubectl --context=${{ env.ADMIN_CTX }} delete clusterrolebinding teardown-admin \
             --ignore-not-found
