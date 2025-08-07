@@ -20,16 +20,17 @@ jobs:
   reset:
     runs-on: ubuntu-latest
     env:
-      KUBECONFIG: $HOME/.kube/config
       ADMIN_CTX: k3s-admin
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
+
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
         with:
           version: latest
+
       - name: Validate inputs
         run: |
           NS="${{ inputs.namespace }}"
@@ -42,7 +43,8 @@ jobs:
             echo "❌ Type YES for a FULL wipe."; exit 1
           fi
           echo "✅ Inputs ok: namespace=$NS, full=$FULL"
-      - name: Decode & merge kubeconfigs
+
+      - name: Decode kubeconfigs
         run: |
           mkdir -p ~/.kube
           if [[ -z "${{ secrets.KUBE_CONFIG_CLOUDFLARE }}" ]]; then
@@ -51,36 +53,31 @@ jobs:
           if [[ -z "${{ secrets.K3S_ADMIN_KUBECONFIG }}" ]]; then
             echo "❌ Missing K3S_ADMIN_KUBECONFIG secret"; exit 1
           fi
+
+          # Decode both kubeconfigs into separate files
           echo "${{ secrets.KUBE_CONFIG_CLOUDFLARE }}" \
             | base64 --decode > ~/.kube/remote-config
           echo "${{ secrets.K3S_ADMIN_KUBECONFIG }}" \
             | base64 --decode > ~/.kube/admin-config
-          KUBECONFIG=~/.kube/remote-config:~/.kube/admin-config \
-            kubectl config view --flatten > ~/.kube/config
-          chmod 600 ~/.kube/config
-      - name: Create named contexts
+
+      - name: Expose merged KUBECONFIG for all steps
         run: |
-          # This will point “remote-cloudflare” at the “remote” cluster + its user
-          kubectl config set-context remote-cloudflare \
-            --cluster=remote \
-            --user=cloudflare-user
-          # Likewise hook up “k3s-admin” to the admin cluster + its user
-          kubectl config set-context k3s-admin \
-            --cluster=k3s-admin \
-            --user=k3s-admin
-          # (Optional) verify
-          kubectl config get-contexts -o name
+          # This makes kubectl read both files (and any contexts they define)
+          echo "KUBECONFIG=~/.kube/remote-config:~/.kube/admin-config" >> $GITHUB_ENV
+        # From now on, every kubectl command automatically sees both configs.
+
       - name: Debug show all contexts
         run: |
-          echo "--- kubectl config view ---"
-          kubectl config view --minify=false
           echo "--- available contexts ---"
           kubectl config get-contexts -o name
+
       - name: Patch remote cluster entry & skip TLS verify
         run: |
+          # ensure the remote-cloudflare context’s cluster endpoint is correct
           kubectl --context=remote-cloudflare config set-cluster remote \
             --server=https://api.istartit.com:443 \
             --insecure-skip-tls-verify=true
+
       - name: Grant teardown-admin to cloudflare-user
         run: |
           kubectl --context=${{ env.ADMIN_CTX }} create clusterrolebinding teardown-admin \
@@ -88,6 +85,7 @@ jobs:
             --serviceaccount=default:cloudflare-user \
             --dry-run=client -o yaml \
           | kubectl --context=${{ env.ADMIN_CTX }} apply -f -
+
       - name: Wipe namespaces
         run: |
           set -euo pipefail
@@ -96,22 +94,25 @@ jobs:
           TARGETS=("$NS")
           [[ "$NS" == "both" ]] && TARGETS=(dev prod)
           [[ "$FULL" == "FULL" ]] && TARGETS+=(flux-system kyverno)
+
           echo "Deleting namespaces: ${TARGETS[*]}"
           for N in "${TARGETS[@]}"; do
             kubectl --context=remote-cloudflare delete ns "$N" \
               --ignore-not-found --wait=false
+
             for i in {1..30}; do
               sleep 2
               ! kubectl --context=remote-cloudflare get ns "$N" &>/dev/null && break
             done
+
             if kubectl --context=remote-cloudflare get ns "$N" &>/dev/null; then
-              RAW=$(kubectl --context=remote-cloudflare get ns "$N" -o json)
-              echo "$RAW" \
+              kubectl --context=remote-cloudflare get ns "$N" -o json \
                 | jq 'del(.spec.finalizers)' \
                 | kubectl --context=remote-cloudflare \
                     replace --raw "/api/v1/namespaces/$N/finalize" -f -
             fi
           done
+
       - name: Clean residual namespaced resources
         run: |
           NS="${{ inputs.namespace }}"
@@ -119,6 +120,7 @@ jobs:
           LIST=("$NS")
           [[ "$NS" == "both" ]] && LIST=(dev prod)
           [[ "$FULL" == "FULL" ]] && LIST+=(flux-system kyverno)
+
           for N in "${LIST[@]}"; do
             for kind in $(kubectl --context=remote-cloudflare \
               api-resources --namespaced=true --verbs=list -o name); do
@@ -126,6 +128,7 @@ jobs:
                 -n "$N" --all --ignore-not-found || true
             done
           done
+
       - name: Strip stuck CRD finalizers
         if: ${{ inputs.full == 'FULL' }}
         run: |
@@ -133,6 +136,7 @@ jobs:
             kubectl --context=remote-cloudflare patch "$crd" \
               --type=merge -p '{"metadata":{"finalizers":[]}}' || true
           done
+
       - name: Wipe cluster-scoped resources
         if: ${{ inputs.full == 'FULL' }}
         run: |
@@ -142,23 +146,28 @@ jobs:
             | grep -v 'k3s.cattle.io' \
             | xargs -r kubectl --context=remote-cloudflare delete \
                 --ignore-not-found --timeout=60s
+
           echo "Deleting webhook configurations"
           kubectl --context=remote-cloudflare delete \
             mutatingwebhookconfiguration,validatingwebhookconfiguration \
             --all --ignore-not-found --timeout=30s
+
           echo "Deleting selected APIService definitions"
           kubectl --context=remote-cloudflare get apiservice -o name \
             | grep -E '(helm|traffic|kyverno)' \
             | xargs -r kubectl --context=remote-cloudflare delete \
                 --ignore-not-found --timeout=30s
+
           echo "Deleting all PersistentVolumes"
           kubectl --context=remote-cloudflare delete pv \
             --all --ignore-not-found --timeout=30s
+
           echo "Deleting storageclasses except local-path-storage"
           kubectl --context=remote-cloudflare get storageclass -o name \
             | grep -v 'local-path-storage' \
             | xargs -r kubectl --context=remote-cloudflare delete \
                 --ignore-not-found --timeout=30s
+
       - name: Cleanup teardown-admin binding
         if: always()
         run: |
