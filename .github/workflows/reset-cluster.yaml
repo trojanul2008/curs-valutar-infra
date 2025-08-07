@@ -1,4 +1,4 @@
-name: "⚠️ Reset Cluster"
+name: "⚠️  Reset Cluster"
 
 on:
   workflow_dispatch:
@@ -20,24 +20,21 @@ jobs:
   reset:
     runs-on: ubuntu-latest
     env:
-      # point kubectl at the one config containing both contexts
-      KUBECONFIG: ${{ github.workspace }}/.kube/config
+      # point kubectl at your one kubeconfig
+      KUBECONFIG: $HOME/.kube/config
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
-
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
         with:
           version: latest
-
       - name: Validate inputs
         run: |
           NS="${{ inputs.namespace }}"
           CONF="${{ inputs.confirm }}"
           FULL="${{ inputs.full }}"
-
           if [[ "$NS" =~ ^(prod|both)$ && "$CONF" != "YES" ]]; then
             echo "❌ Type YES to wipe prod or both."; exit 1
           fi
@@ -45,54 +42,41 @@ jobs:
             echo "❌ Type YES for a FULL wipe."; exit 1
           fi
           echo "✅ Inputs ok: namespace=$NS, full=$FULL"
-
       - name: Decode kubeconfig
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBE_CONFIG }}" \
             | base64 --decode > ~/.kube/config
           chmod 600 ~/.kube/config
-
-      - name: Patch cluster endpoint & skip TLS verify
+      - name: Patch remote cluster entry & skip TLS verify
         run: |
-          # the k3s-admin context in your config is named "k3s-admin"
-          kubectl --context=k3s-admin config set-cluster default \
+          kubectl --context=remote-cloudflare config set-cluster remote \
             --server=https://api.istartit.com:443 \
             --insecure-skip-tls-verify=true
-
       - name: Grant teardown-admin to cloudflare-user
         run: |
-          # create the CRB via the admin context
-          kubectl --context=k3s-admin create clusterrolebinding teardown-admin \
+          kubectl --context=remote-cloudflare create clusterrolebinding teardown-admin \
             --clusterrole=cluster-admin \
             --serviceaccount=default:cloudflare-user \
             --dry-run=client -o yaml \
-          | kubectl --context=k3s-admin apply -f -
-
+          | kubectl --context=remote-cloudflare apply -f -
       - name: Wipe namespaces
         run: |
           set -euo pipefail
-
           NS="${{ inputs.namespace }}"
           FULL="${{ inputs.full }}"
           TARGETS=("$NS")
           [[ "$NS" == "both" ]] && TARGETS=(dev prod)
-
           if [[ "$FULL" == "FULL" ]]; then
             TARGETS+=(flux-system kyverno)
           fi
-
-          echo "Deleting namespaces: ${TARGETS[*]}"
           for N in "${TARGETS[@]}"; do
             kubectl --context=remote-cloudflare delete ns "$N" \
               --ignore-not-found --wait=false
-
             for i in {1..30}; do
               sleep 2
               ! kubectl --context=remote-cloudflare get ns "$N" &>/dev/null && break
             done
-
-            # strip finalizers if still stuck
             if kubectl --context=remote-cloudflare get ns "$N" &>/dev/null; then
               RAW=$(kubectl --context=remote-cloudflare get ns "$N" -o json)
               echo "$RAW" \
@@ -101,18 +85,15 @@ jobs:
                     replace --raw "/api/v1/namespaces/$N/finalize" -f -
             fi
           done
-
       - name: Clean residual namespaced resources
         run: |
           NS="${{ inputs.namespace }}"
           FULL="${{ inputs.full }}"
           LIST=("$NS")
           [[ "$NS" == "both" ]] && LIST=(dev prod)
-
           if [[ "$FULL" == "FULL" ]]; then
             LIST+=(flux-system kyverno)
           fi
-
           for N in "${LIST[@]}"; do
             for kind in $(kubectl --context=remote-cloudflare \
               api-resources --namespaced=true --verbs=list -o name); do
@@ -120,7 +101,6 @@ jobs:
                 -n "$N" --all --ignore-not-found || true
             done
           done
-
       - name: Strip stuck CRD finalizers
         if: ${{ inputs.full == 'FULL' }}
         run: |
@@ -128,38 +108,35 @@ jobs:
             kubectl --context=remote-cloudflare patch "$crd" \
               --type=merge -p '{"metadata":{"finalizers":[]}}' || true
           done
-
       - name: Wipe cluster-scoped resources
         if: ${{ inputs.full == 'FULL' }}
         run: |
           set -euo pipefail
-
           echo "Deleting CRDs except k3s-managed"
           kubectl --context=remote-cloudflare get crd -o name \
             | grep -v 'k3s.cattle.io' \
-            | xargs -r kubectl --context=remote-cloudflare delete --ignore-not-found --timeout=60s
-
+            | xargs -r kubectl --context=remote-cloudflare delete \
+                --ignore-not-found --timeout=60s
           echo "Deleting webhook configurations"
           kubectl --context=remote-cloudflare delete \
             mutatingwebhookconfiguration,validatingwebhookconfiguration \
             --all --ignore-not-found --timeout=30s
-
           echo "Deleting selected APIService definitions"
           kubectl --context=remote-cloudflare get apiservice -o name \
             | grep -E '(helm|traffic|kyverno)' \
-            | xargs -r kubectl --context=remote-cloudflare delete --ignore-not-found --timeout=30s
-
+            | xargs -r kubectl --context=remote-cloudflare delete \
+                --ignore-not-found --timeout=30s
           echo "Deleting all PersistentVolumes"
           kubectl --context=remote-cloudflare delete pv \
             --all --ignore-not-found --timeout=30s
-
           echo "Deleting storageclasses except local-path-storage"
           kubectl --context=remote-cloudflare get storageclass -o name \
             | grep -v 'local-path-storage' \
-            | xargs -r kubectl --context=remote-cloudflare delete --ignore-not-found --timeout=30s
-
+            | xargs -r kubectl --context=remote-cloudflare delete \
+                --ignore-not-found --timeout=30s
       - name: Cleanup teardown-admin binding
         if: always()
         run: |
-          kubectl --context=k3s-admin delete clusterrolebinding teardown-admin \
+          kubectl --context=remote-cloudflare delete \
+            clusterrolebinding teardown-admin \
             --ignore-not-found
