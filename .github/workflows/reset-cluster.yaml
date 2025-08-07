@@ -20,7 +20,6 @@ jobs:
   reset:
     runs-on: ubuntu-latest
     env:
-      # point kubectl at your one kubeconfig
       KUBECONFIG: $HOME/.kube/config
 
     steps:
@@ -48,6 +47,8 @@ jobs:
           echo "${{ secrets.KUBE_CONFIG }}" \
             | base64 --decode > ~/.kube/config
           chmod 600 ~/.kube/config
+      - name: (Debug) List contexts
+        run: kubectl config get-contexts -o name
       - name: Patch remote cluster entry & skip TLS verify
         run: |
           kubectl --context=remote-cloudflare config set-cluster remote \
@@ -55,11 +56,12 @@ jobs:
             --insecure-skip-tls-verify=true
       - name: Grant teardown-admin to cloudflare-user
         run: |
-          kubectl --context=remote-cloudflare create clusterrolebinding teardown-admin \
+          # <<— note we use k3s-admin here, not remote-cloudflare
+          kubectl --context=k3s-admin create clusterrolebinding teardown-admin \
             --clusterrole=cluster-admin \
             --serviceaccount=default:cloudflare-user \
             --dry-run=client -o yaml \
-          | kubectl --context=remote-cloudflare apply -f -
+          | kubectl --context=k3s-admin apply -f -
       - name: Wipe namespaces
         run: |
           set -euo pipefail
@@ -67,9 +69,8 @@ jobs:
           FULL="${{ inputs.full }}"
           TARGETS=("$NS")
           [[ "$NS" == "both" ]] && TARGETS=(dev prod)
-          if [[ "$FULL" == "FULL" ]]; then
-            TARGETS+=(flux-system kyverno)
-          fi
+          [[ "$FULL" == "FULL" ]] && TARGETS+=(flux-system kyverno)
+          echo "Deleting namespaces: ${TARGETS[*]}"
           for N in "${TARGETS[@]}"; do
             kubectl --context=remote-cloudflare delete ns "$N" \
               --ignore-not-found --wait=false
@@ -91,9 +92,7 @@ jobs:
           FULL="${{ inputs.full }}"
           LIST=("$NS")
           [[ "$NS" == "both" ]] && LIST=(dev prod)
-          if [[ "$FULL" == "FULL" ]]; then
-            LIST+=(flux-system kyverno)
-          fi
+          [[ "$FULL" == "FULL" ]] && LIST+=(flux-system kyverno)
           for N in "${LIST[@]}"; do
             for kind in $(kubectl --context=remote-cloudflare \
               api-resources --namespaced=true --verbs=list -o name); do
@@ -137,6 +136,5 @@ jobs:
       - name: Cleanup teardown-admin binding
         if: always()
         run: |
-          kubectl --context=remote-cloudflare delete \
-            clusterrolebinding teardown-admin \
+          kubectl --context=k3s-admin delete clusterrolebinding teardown-admin \
             --ignore-not-found
