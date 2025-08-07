@@ -42,11 +42,18 @@ jobs:
             echo "❌ Type YES for a FULL wipe."; exit 1
           fi
           echo "✅ Inputs ok: namespace=$NS, full=$FULL"
-      - name: Decode kubeconfig
+      - name: Decode & merge kubeconfigs
         run: |
           mkdir -p ~/.kube
-          echo "${{ secrets.KUBE_CONFIG }}" \
-            | base64 --decode > ~/.kube/config
+          # Decode remote-cloudflare
+          echo "${{ secrets.KUBE_CONFIG_CLOUDFLARE }}" \
+            | base64 --decode > ~/.kube/remote-config
+          # Decode k3s-admin
+          echo "${{ secrets.K3S_ADMIN_KUBECONFIG }}" \
+            | base64 --decode > ~/.kube/admin-config
+          # Merge into one flat config
+          KUBECONFIG=~/.kube/remote-config:~/.kube/admin-config \
+            kubectl config view --flatten > ~/.kube/config
           chmod 600 ~/.kube/config
       - name: Debug show all contexts
         run: |
@@ -56,7 +63,7 @@ jobs:
           kubectl config get-contexts -o name
       - name: Patch remote cluster entry & skip TLS verify
         run: |
-          kubectl --context=remote-cloudflare config set-cluster remote \
+          kubectl --context=remote-cloudflare config set-cluster remote-cloudflare \
             --server=https://api.istartit.com:443 \
             --insecure-skip-tls-verify=true
       - name: Grant teardown-admin to cloudflare-user
