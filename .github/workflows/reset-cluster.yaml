@@ -79,7 +79,7 @@ jobs:
           kubectl config get-contexts -o name
       - name: Patch remote cluster entry & skip TLS verify
         run: |
-          kubectl --context=remote-cloudflare config set-cluster remote-cloudflare \
+          kubectl --context=remote-cloudflare config set-cluster remote \
             --server=https://api.istartit.com:443 \
             --insecure-skip-tls-verify=true
       - name: Grant teardown-admin to cloudflare-user
