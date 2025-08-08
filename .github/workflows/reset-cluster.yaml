@@ -129,7 +129,6 @@ jobs:
           [[ "$NS" == "both" ]] && LIST=(dev prod)
           [[ "$FULL" == "FULL" ]] && LIST+=(flux-system kyverno)
 
-          # Bail out after 3 minutes if this step hangs
           timeout 3m bash -c "
             for N in \"\${LIST[@]}\"; do
               echo \"=== cleaning namespaced resources in: \$N ===\"
@@ -186,13 +185,20 @@ jobs:
           done
 
           echo "=== Deleting selected APIService definitions ==="
-          kubectl --context=${{ env.ADMIN_CTX }} get apiservice -o name \
-            | tee /tmp/apiservices.txt
-          grep -E '(helm|traffic|kyverno)' /tmp/apiservices.txt | while read apisvc; do
-            echo " deleting $apisvc"
-            kubectl --context=${{ env.ADMIN_CTX }} delete "$apisvc" \
-              --ignore-not-found --timeout=30s || echo "  ❌ failed"
-          done
+          # capture & filter, but never fail if empty
+          APISVCS=$(kubectl --context=${{ env.ADMIN_CTX }} get apiservice -o name \
+                    | grep -E '(helm|traffic|kyverno)' || true)
+          if [[ -n "$APISVCS" ]]; then
+            echo " Found APIServices to delete:"
+            echo "$APISVCS"
+            while read apisvc; do
+              echo " deleting $apisvc"
+              kubectl --context=${{ env.ADMIN_CTX }} delete "$apisvc" \
+                --ignore-not-found --timeout=30s || echo "  ❌ failed"
+            done <<<"$APISVCS"
+          else
+            echo " No matching APIServices (helm|traffic|kyverno)"
+          fi
 
           echo "=== Deleting all PersistentVolumes ==="
           kubectl --context=${{ env.ADMIN_CTX }} delete pv \
