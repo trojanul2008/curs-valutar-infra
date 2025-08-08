@@ -47,12 +47,6 @@ jobs:
       - name: Decode kubeconfigs
         run: |
           mkdir -p ~/.kube
-          if [[ -z "${{ secrets.KUBE_CONFIG_CLOUDFLARE }}" ]]; then
-            echo "❌ Missing KUBE_CONFIG_CLOUDFLARE secret"; exit 1
-          fi
-          if [[ -z "${{ secrets.K3S_ADMIN_KUBECONFIG }}" ]]; then
-            echo "❌ Missing K3S_ADMIN_KUBECONFIG secret"; exit 1
-          fi
           echo "${{ secrets.KUBE_CONFIG_CLOUDFLARE }}" \
             | base64 --decode > ~/.kube/remote-config
           echo "${{ secrets.K3S_ADMIN_KUBECONFIG }}" \
@@ -65,7 +59,6 @@ jobs:
 
       - name: Expose merged KUBECONFIG for all steps
         run: |
-          # Use $HOME, not ~, so it expands correctly in GitHub Actions
           echo "KUBECONFIG=$HOME/.kube/remote-config:$HOME/.kube/admin-config" >> $GITHUB_ENV
 
       - name: Debug show all contexts
@@ -112,7 +105,7 @@ jobs:
 
             echo "attempting finalizers cleanup for $N"
             RAW=$(kubectl --context=${{ env.ADMIN_CTX }} get ns "$N" -o json 2>/dev/null || echo "")
-            echo "RAW JSON for $N: '$RAW'"
+            echo "RAW JSON for $N: ${RAW:-<empty>}"
 
             if [[ -n "$RAW" ]]; then
               echo "$RAW" | jq .
@@ -127,6 +120,9 @@ jobs:
 
       - name: Clean residual namespaced resources
         run: |
+          set -euo pipefail
+          set -x
+
           NS="${{ inputs.namespace }}"
           FULL="${{ inputs.full }}"
           LIST=("$NS")
@@ -134,10 +130,15 @@ jobs:
           [[ "$FULL" == "FULL" ]] && LIST+=(flux-system kyverno)
 
           for N in "${LIST[@]}"; do
-            for kind in $(kubectl --context=${{ env.ADMIN_CTX }} \
-              api-resources --namespaced=true --verbs=list -o name); do
+            echo "=== cleaning namespaced resources in $N ==="
+            # list all namespaced API resource kinds once
+            KINDS=$(kubectl --context=${{ env.ADMIN_CTX }} \
+              api-resources --namespaced=true --verbs=list -o name)
+            echo " Found kinds: $KINDS"
+            for kind in $KINDS; do
+              echo "  -> deleting all $kind in namespace $N"
               kubectl --context=${{ env.ADMIN_CTX }} delete "$kind" \
-                -n "$N" --all --ignore-not-found || true
+                -n "$N" --all --ignore-not-found || echo "    ❌ delete $kind failed"
             done
           done
 
@@ -153,32 +154,48 @@ jobs:
         if: ${{ inputs.full == 'FULL' }}
         run: |
           set -euo pipefail
-          echo "Deleting CRDs except k3s-managed"
+          set -x
+
+          echo "=== Deleting CRDs except k3s-managed ==="
           kubectl --context=${{ env.ADMIN_CTX }} get crd -o name \
-            | grep -v 'k3s.cattle.io' \
-            | xargs -r kubectl --context=${{ env.ADMIN_CTX }} delete \
-                --ignore-not-found --timeout=60s
+            | tee /tmp/crds.txt
+          grep -v 'k3s.cattle.io' /tmp/crds.txt \
+            | while read crd; do
+                echo " deleting $crd"
+                kubectl --context=${{ env.ADMIN_CTX }} delete "$crd" \
+                  --ignore-not-found --timeout=60s || echo "  ❌ failed"
+              done
 
-          echo "Deleting webhook configurations"
-          kubectl --context=${{ env.ADMIN_CTX }} delete \
-            mutatingwebhookconfiguration,validatingwebhookconfiguration \
-            --all --ignore-not-found --timeout=30s
+          echo "=== Deleting webhook configurations ==="
+          for w in mutatingwebhookconfiguration validatingwebhookconfiguration; do
+            echo " deleting $w"
+            kubectl --context=${{ env.ADMIN_CTX }} delete "$w" \
+              --all --ignore-not-found --timeout=30s || echo "  ❌ failed"
+          done
 
-          echo "Deleting selected APIService definitions"
+          echo "=== Deleting selected APIService definitions ==="
           kubectl --context=${{ env.ADMIN_CTX }} get apiservice -o name \
-            | grep -E '(helm|traffic|kyverno)' \
-            | xargs -r kubectl --context=${{ env.ADMIN_CTX }} delete \
-                --ignore-not-found --timeout=30s
+            | tee /tmp/apiservices.txt
+          grep -E '(helm|traffic|kyverno)' /tmp/apiservices.txt \
+            | while read apisvc; do
+                echo " deleting $apisvc"
+                kubectl --context=${{ env.ADMIN_CTX }} delete "$apisvc" \
+                  --ignore-not-found --timeout=30s || echo "  ❌ failed"
+              done
 
-          echo "Deleting all PersistentVolumes"
+          echo "=== Deleting all PersistentVolumes ==="
           kubectl --context=${{ env.ADMIN_CTX }} delete pv \
-            --all --ignore-not-found --timeout=30s
+            --all --ignore-not-found --timeout=30s || true
 
-          echo "Deleting storageclasses except local-path-storage"
+          echo "=== Deleting storageclasses except local-path-storage ==="
           kubectl --context=${{ env.ADMIN_CTX }} get storageclass -o name \
-            | grep -v 'local-path-storage' \
-            | xargs -r kubectl --context=${{ env.ADMIN_CTX }} delete \
-                --ignore-not-found --timeout=30s
+            | tee /tmp/scs.txt
+          grep -v 'local-path-storage' /tmp/scs.txt \
+            | while read sc; do
+                echo " deleting $sc"
+                kubectl --context=${{ env.ADMIN_CTX }} delete "$sc" \
+                  --ignore-not-found --timeout=30s || echo "  ❌ failed"
+              done
 
       - name: Cleanup teardown-admin binding
         if: always()
