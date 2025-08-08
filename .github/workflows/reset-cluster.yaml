@@ -89,7 +89,7 @@ jobs:
           FULL="${{ inputs.full }}"
           TARGETS=("$NS")
           [[ "$NS" == "both" ]]     && TARGETS=(dev prod)
-          [[ "$FULL" == "FULL" ]]   && TARGETS+=(flux-system kyverno)
+          [[ "$FULL" == "FULL" ]]   && TARGETS+=(flux-system kyverno traefik)
 
           echo "Deleting namespaces: ${TARGETS[*]}"
           for N in "${TARGETS[@]}"; do
