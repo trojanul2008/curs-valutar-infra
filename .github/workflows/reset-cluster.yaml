@@ -95,7 +95,7 @@ jobs:
           for N in "${TARGETS[@]}"; do
             echo "=== processing namespace: $N ==="
             kubectl --context="${{ env.ADMIN_CTX }}" delete ns "$N" \
-              --ignore-not-found --wait=false
+              --ignore-not-found --grace-period=0 --force --wait=false
 
             for i in {1..30}; do
               echo " waiting for $N to disappear (attempt $i)"
