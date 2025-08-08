@@ -186,20 +186,42 @@ jobs:
           TRAEFIK_CHART=$(yq e -r '.traefikChart' .github/versions.yaml | sed 's/^v//')
           echo "📦 app version: $TRAEFIK_APP   chart version: $TRAEFIK_CHART"
           echo "::endgroup::"
+          echo "::group::Detect LoadBalancer controller"
+          HAS_LB=false
+          if kubectl get pods -n metallb-system 2>/dev/null | grep -qi 'controller'; then
+            echo "✅ Detected MetalLB"
+            HAS_LB=true
+          fi
+          if kubectl get ds -n kube-system 2>/dev/null | grep -qi 'klipper-lb'; then
+            echo "✅ Detected k3s servicelb (klipper-lb)"
+            HAS_LB=true
+          fi
+          if kubectl get pods -A 2>/dev/null | grep -q 'svclb-'; then
+            echo "✅ Detected svclb-* pods (k3s servicelb)"
+            HAS_LB=true
+          fi
+          if [ "$HAS_LB" = true ]; then
+            echo "🌐 LoadBalancer available — using Service type=LoadBalancer"
+            SVC_FLAGS=()
+          else
+            echo "⚠️ No LoadBalancer controller detected — using Service type=NodePort"
+            # Pin ports if you want predictable access
+            SVC_FLAGS=(--set service.type=NodePort \
+                       --set service.nodePorts.http=30080 \
+                       --set service.nodePorts.https=30443)
+          fi
+          echo "::endgroup::"
           echo "::group::Prepare repo and namespace"
           helm repo add traefik https://helm.traefik.io/traefik >/dev/null
           helm repo update >/dev/null
           kubectl create ns traefik 2>/dev/null || echo "✔️ Namespace 'traefik' already present"
           echo "::endgroup::"
-          # On failure, dump as much context as possible
           dump_debug() {
             echo "::group::Traefik debug dump"
+            kubectl get svc traefik -n traefik -oyaml || true
             kubectl get all -n traefik -o wide || true
             kubectl get events -n traefik --sort-by=.lastTimestamp | tail -n 200 || true
             kubectl describe deployment traefik -n traefik || true
-            kubectl describe svc -n traefik || true
-            kubectl get ingressclass -oyaml || true
-            # Pod logs (best-effort)
             for p in $(kubectl get pods -n traefik -o name 2>/dev/null); do
               echo "--- logs for $p"
               kubectl logs "$p" -n traefik --tail=200 || true
@@ -214,17 +236,18 @@ jobs:
             --version "$TRAEFIK_CHART" \
             --set image.tag="$TRAEFIK_APP" \
             --set additionalArguments="{--providers.kubernetescrd}" \
+            "${SVC_FLAGS[@]}" \
             --wait \
-            --timeout=600s \
+            --timeout=120s \
             --atomic \
             --debug
           END=$(date +%s)
           echo "⏱️ Helm install duration: $((END-START))s"
           echo "::endgroup::"
           echo "::group::Post-install verification"
-          kubectl rollout status deployment/traefik -n traefik --timeout=180s
+          kubectl rollout status deployment/traefik -n traefik --timeout=60s
+          kubectl get svc traefik -n traefik -o wide
           kubectl get pods -n traefik -o wide
-          kubectl get svc -n traefik -o wide
           kubectl get events -n traefik --sort-by=.lastTimestamp | tail -n 100
           echo "::endgroup::"
 
