@@ -19,4 +19,5 @@ spec:
     - image-update-automation.yaml
     - source-dev.yaml             # infra-dev
     - external-secrets-install.yaml
-    - app-kustomization.yaml
+    - curs-valutar-dev.yaml
+    - curs-valutar-prod.yaml
