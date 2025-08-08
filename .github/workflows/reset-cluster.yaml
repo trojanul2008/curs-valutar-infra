@@ -1,4 +1,4 @@
-name: "⚠️  Reset Cluster"
+name: "⚠️  Reset Cluster "
 
 on:
   workflow_dispatch:
@@ -8,26 +8,23 @@ on:
         required: true
         default: dev
       confirm:
-        description: "Type YES to confirm deletion (required for prod/both and FULL)"
+        description: "Type YES to confirm deletion (required for prod or both, and for FULL)"
         required: false
         default: ""
       full:
-        description: "Type FULL to wipe cluster-scoped resources as well"
+        description: "Type FULL to also wipe cluster-scoped resources (CRDs, webhook configs, PVs, etc.)"
         required: false
         default: ""
-      dry_run:
-        description: "true to only list what would be deleted"
-        required: false
-        default: "false"
 
 jobs:
   reset:
     runs-on: ubuntu-latest
     env:
       ADMIN_CTX: remote-cloudflare
+      DRY_RUN: "true"
 
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v3
 
       - name: Install kubectl
@@ -40,148 +37,212 @@ jobs:
           NS="${{ inputs.namespace }}"
           CONF="${{ inputs.confirm }}"
           FULL="${{ inputs.full }}"
-          DRY="${{ inputs.dry_run }}"
           if [[ "$NS" =~ ^(prod|both)$ && "$CONF" != "YES" ]]; then
-            echo "❌ Type YES to wipe prod/both."; exit 1
+            echo "❌ Type YES to wipe prod or both."; exit 1
           fi
           if [[ "$FULL" == "FULL" && "$CONF" != "YES" ]]; then
             echo "❌ Type YES for a FULL wipe."; exit 1
           fi
-          echo "✅ namespace=$NS full=$FULL dry_run=$DRY"
+          echo "✅ Inputs ok: namespace=$NS, full=$FULL, dry-run=$DRY_RUN"
 
-      - name: Setup kubeconfig
+      - name: Decode kubeconfigs
         run: |
           mkdir -p ~/.kube
-          echo "${{ secrets.KUBE_CONFIG_CLOUDFLARE }}" | base64 -d > ~/.kube/remote
-          echo "${{ secrets.K3S_ADMIN_KUBECONFIG }}" | base64 -d > ~/.kube/admin
-          echo "KUBECONFIG=$HOME/.kube/remote:$HOME/.kube/admin" >> $GITHUB_ENV
+          echo "${{ secrets.KUBE_CONFIG_CLOUDFLARE }}" | base64 --decode > ~/.kube/remote-config
+          echo "${{ secrets.K3S_ADMIN_KUBECONFIG }}"   | base64 --decode > ~/.kube/admin-config
 
-      - name: Helper choose delete command
+      - name: Expose merged KUBECONFIG for all steps
         run: |
-          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
-            echo "DEL=echo DRY-RUN:" >> $GITHUB_ENV
-          else
-            echo "DEL=kubectl --context=${{ env.ADMIN_CTX }}" >> $GITHUB_ENV
-          fi
+          echo "KUBECONFIG=$HOME/.kube/remote-config:$HOME/.kube/admin-config" >> $GITHUB_ENV
+
+      - name: Debug show contexts
+        run: |
+          echo "--- available contexts ---"
+          kubectl config get-contexts -o name
+
+      - name: Patch remote cluster entry & skip TLS verify
+        run: |
+          kubectl --context=remote-cloudflare config set-cluster remote \
+            --server=https://api.istartit.com:443 \
+            --insecure-skip-tls-verify=true
+
+      - name: Grant teardown-admin to cloudflare-user
+        run: |
+          kubectl --context="${{ env.ADMIN_CTX }}" create clusterrolebinding teardown-admin \
+            --clusterrole=cluster-admin \
+            --serviceaccount=default:cloudflare-user \
+            --dry-run=client -o yaml \
+          | kubectl --context="${{ env.ADMIN_CTX }}" apply -f -
 
       - name: Wipe namespaces
         run: |
-          set -euxo pipefail
+          set -euo pipefail
+          set -x
           NS="${{ inputs.namespace }}"
           FULL="${{ inputs.full }}"
           TARGETS=("$NS")
-          [[ "$NS" == "both" ]] && TARGETS=(dev prod)
-          [[ "$FULL" == "FULL" ]] && TARGETS+=(flux-system kyverno)
+          [[ "$NS" == "both" ]]     && TARGETS=(dev prod)
+          [[ "$FULL" == "FULL" ]]   && TARGETS+=(flux-system kyverno)
 
+          echo "Deleting namespaces: ${TARGETS[*]}"
           for N in "${TARGETS[@]}"; do
-            echo "🗑️  Namespace: $N"
-            $DEL delete ns "$N" --ignore-not-found --wait=false
+            echo "=== processing namespace: $N ==="
+            kubectl --context="${{ env.ADMIN_CTX }}" delete ns "$N" \
+              --ignore-not-found --wait=false
+
             for i in {1..30}; do
+              echo " waiting for $N to disappear (attempt $i)"
               sleep 2
-              ! kubectl --context=${{ env.ADMIN_CTX }} get ns "$N" &>/dev/null && break
+              ! kubectl --context="${{ env.ADMIN_CTX }}" get ns "$N" &>/dev/null && break
             done
-            RAW=$(kubectl --context=${{ env.ADMIN_CTX }} get ns "$N" -o json 2>/dev/null || echo "")
+
+            echo "Attempting finalizers cleanup for $N"
+            RAW=$(kubectl --context="${{ env.ADMIN_CTX }}" get ns "$N" -o json 2>/dev/null || echo "")
             if [[ -n "$RAW" ]]; then
-              echo " ⚙️  Finalizing $N"
-              echo "$RAW" | jq 'del(.spec.finalizers)' \
-                | kubectl --context=${{ env.ADMIN_CTX }} replace --raw "/api/v1/namespaces/$N/finalize" -f -
+              echo "$RAW" | jq .
+              echo "$RAW" \
+                | jq 'del(.spec.finalizers)' \
+                | kubectl --context="${{ env.ADMIN_CTX }}" \
+                    replace --raw "/api/v1/namespaces/$N/finalize" -f -
+            else
+              echo " no raw JSON found for $N, skipping finalize"
             fi
           done
 
-      - name: Clean namespaced resources
+      - name: Clean residual namespaced resources
         run: |
-          set -euxo pipefail
+          set -euo pipefail
+          set -x
           NS="${{ inputs.namespace }}"
           FULL="${{ inputs.full }}"
           LIST=("$NS")
-          [[ "$NS" == "both" ]] && LIST=(dev prod)
-          [[ "$FULL" == "FULL" ]] && LIST+=(flux-system kyverno)
+          [[ "$NS" == "both" ]]     && LIST=(dev prod)
+          [[ "$FULL" == "FULL" ]]   && LIST+=(flux-system kyverno)
 
-          for N in "${LIST[@]}"; do
-            echo "🔎 scanning resources in $N"
-            for kind in $(kubectl api-resources --namespaced=true --verbs=list -o name); do
-              RES=$(kubectl get "$kind" -n "$N" -o name 2>/dev/null || true)
-              if [[ -n "$RES" ]]; then
-                echo "  would delete ($kind):"
-                echo "$RES" | sed 's/^/    /'
-                echo "$RES" | xargs -I{} $DEL delete {} -n "$N" --force --grace-period=0 --ignore-not-found
-              fi
+          timeout 3m bash -c "
+            for N in \"\${LIST[@]}\"; do
+              echo \"=== cleaning namespaced resources in: \$N ===\"
+              for kind in \$(kubectl --context=${{ env.ADMIN_CTX }} \
+                api-resources --namespaced=true --verbs=list -o name); do
+
+                echo \"  → checking \$kind in \$N\"
+                RES=\$(kubectl --context=${{ env.ADMIN_CTX }} get \$kind -n \$N -o name 2>/dev/null || echo "")
+                if [[ -n \"\$RES\" ]]; then
+                  echo \"    found: \$RES\"
+                  for r in \$RES; do
+                    echo \"      force-deleting \$r\"
+                    kubectl --context=${{ env.ADMIN_CTX }} delete \$r \
+                      --force --grace-period=0 --ignore-not-found || true
+                  done
+                fi
+              done
             done
-          done
+          "
 
-      - name: Strip & delete CRDs, webhooks, APIServices, PVs, SCs
+      - name: Strip stuck CRD finalizers
         if: ${{ inputs.full == 'FULL' }}
         run: |
-          set -euxo pipefail
+          for crd in $(kubectl --context=${{ env.ADMIN_CTX }} get crd -o name); do
+            kubectl --context=${{ env.ADMIN_CTX }} patch "$crd" \
+              --type=merge -p '{"metadata":{"finalizers":[]}}' || true
+          done
 
-          # 1) CRDs
-          echo "🔎 all CRDs"
-          ALL=$(kubectl get crd -o name)
-          DEFAULT='k3s.cattle.io'
-          NON=$(echo "$ALL" | grep -v "$DEFAULT" || true)
-          echo "$NON" | sed 's/^/  delete /'
-          echo "$NON" | xargs -I{} $DEL delete {} --ignore-not-found
+      - name: Wipe cluster-scoped resources
+        if: ${{ inputs.full == 'FULL' }}
+        run: |
+          set -euo pipefail
+          set -x
 
-          # 2) Webhooks
+          # CRDs
+          echo "=== Deleting CRDs except k3s-managed ==="
+          ALL_CRDS=$(kubectl --context=${{ env.ADMIN_CTX }} get crd -o name)
+          TO_DELETE_CRDS=$(echo "$ALL_CRDS" | grep -v 'k3s.cattle.io' || true)
+          for crd in $TO_DELETE_CRDS; do
+            echo " deleting CRD: $crd"
+            [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" delete "$crd" --ignore-not-found --timeout=60s
+          done
+
+          # Webhooks
+          echo "=== Deleting webhook configurations ==="
           for w in mutatingwebhookconfiguration validatingwebhookconfiguration; do
-            echo "  delete webhook: $w"
-            $DEL delete $w --all --ignore-not-found
+            echo " deleting all $w"
+            [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" delete "$w" --all --ignore-not-found --timeout=30s
           done
 
-          # 3) APIService
-          NONAPI=$(kubectl get apiservice -o name | grep -E '(helm|traffic|kyverno)' || true)
-          echo "$NONAPI" | sed 's/^/  delete /'
-          echo "$NONAPI" | xargs -I{} $DEL delete {} --ignore-not-found
+          # APIService
+          echo "=== Deleting selected APIService definitions ==="
+          APISVCS=$(kubectl --context=${{ env.ADMIN_CTX }} get apiservice -o name \
+                    | grep -E '(helm|traffic|kyverno)' || true)
+          for svc in $APISVCS; do
+            echo " deleting APIService: $svc"
+            [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" delete "$svc" --ignore-not-found --timeout=30s
+          done
 
-          # 4) PVs
-          echo "  delete pv --all"
-          $DEL delete pv --all --ignore-not-found
+          # PersistentVolumes
+          echo "=== Deleting all PersistentVolumes ==="
+          [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" delete pv --all --ignore-not-found --timeout=30s
 
-          # 5) StorageClasses
-          ALLSC=$(kubectl get sc -o name)
-          NONSC=$(echo "$ALLSC" | grep -v 'local-path-storage' || true)
-          echo "$NONSC" | sed 's/^/  delete /'
-          echo "$NONSC" | xargs -I{} $DEL delete {} --ignore-not-found
+          # StorageClasses
+          echo "=== Deleting storageclasses except local-path-storage ==="
+          ALL_SCS=$(kubectl --context=${{ env.ADMIN_CTX }} get storageclass -o name)
+          TO_DELETE_SCS=$(echo "$ALL_SCS" | grep -v 'local-path-storage' || true)
+          for sc in $TO_DELETE_SCS; do
+            echo " deleting SC: $sc"
+            [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" delete "$sc" --ignore-not-found --timeout=30s
+          done
 
-      - name: Delete non-default ClusterRoleBindings
-        if: ${{ inputs.full == 'FULL' }}
-        run: |
-          set -euxo pipefail
-          echo "🔎 all ClusterRoleBindings"
-          # Get just the names
-          CRBS=$(kubectl get clusterrolebinding -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}')
-          # Define the ones we want to keep
-          KEEP_REGEX='^(cluster-admin|k3s|system:|teardown-admin)$'
-          echo "→ will keep (matching): $KEEP_REGEX"
-          echo "🔻 scanning for deletions"
-          for crb in $CRBS; do
-            if [[ $crb =~ $KEEP_REGEX ]]; then
-              echo "  🔒 keep: $crb"
+          # ClusterRoleBindings
+          echo "=== Deleting non-standard ClusterRoleBindings ==="
+          KEEP_CRBS=(
+            cluster-admin
+            k3s-cloud-controller-manager
+            k3s-cloud-controller-manager-auth-delegator
+            kube-apiserver-kubelet-admin
+            cloudflare-user-basic
+            cloudflare-user-cluster-admin
+            clustercidrs-node
+            local-path-provisioner-bind
+            metrics-server:system:auth-delegator
+            remote-admin-binding
+          )
+          for crb in $(kubectl --context=${{ env.ADMIN_CTX }} get clusterrolebinding -o name); do
+            name=$(basename "$crb")
+            if [[ " ${KEEP_CRBS[*]} " =~ " ${name} " ]]; then
+              echo " keeping CRB: $crb"
             else
-              echo "  🗑️  delete: $crb"
-              $DEL delete clusterrolebinding "$crb" --ignore-not-found
+              echo " deleting CRB: $crb"
+              [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" delete "$crb" --ignore-not-found --timeout=20s
             fi
           done
 
-      - name: Delete non-default RoleBindings
-        if: ${{ inputs.full == 'FULL' }}
-        run: |
-          set -euxo pipefail
-          echo "🔎 all RoleBindings"
-          # Fetch namespace + name, skip headers
-          kubectl get rolebinding -A \
-            -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name --no-headers \
-          | while read ns name; do
-              KEEP='^(system:|k3s|default|kube|extension)'
-              if [[ $name =~ $KEEP ]]; then
-                echo "  🔒 keep: $ns/$name"
-              else
-                echo "  🗑️  delete: $ns/$name"
-                $DEL delete rolebinding "$name" -n "$ns" --ignore-not-found
+          # RoleBindings
+          echo "=== Deleting non-standard RoleBindings ==="
+          KEEP_RBS=(
+            default/github-runner-edit
+            kube-system/metrics-server-auth-reader
+            kube-system/system:.*
+            kube-system/k3s:.*
+            kube-system/extension:.*
+            remote-admin-binding
+          )
+          while read -r ns name; do
+            full="$ns/$name"
+            keep=false
+            for pat in "${KEEP_RBS[@]}"; do
+              if [[ "$full" =~ ^$pat$ ]]; then
+                keep=true
+                break
               fi
             done
+            if $keep; then
+              echo " keeping RB: $full"
+            else
+              echo " deleting RB: $full"
+              [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" -n "$ns" delete rolebinding "$name" --ignore-not-found --timeout=20s
+            fi
+          done < <(kubectl --context=${{ env.ADMIN_CTX }} get rolebinding -A -o custom-columns="NS:.metadata.namespace,NAME:.metadata.name" --no-headers)
 
       - name: Cleanup teardown-admin binding
         if: always()
         run: |
-          $DEL delete clusterrolebinding teardown-admin --ignore-not-found
+          [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" delete clusterrolebinding teardown-admin --ignore-not-found
