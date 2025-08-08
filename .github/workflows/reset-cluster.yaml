@@ -219,10 +219,25 @@ jobs:
           | while read -r ns name; do
               full="$ns/$name"
               if [[ $full =~ $KEEP_RE ]]; then
-                echo " keeping RB: $full"
+                echo " keeping RB:  $full"
               else
                 echo " deleting RB:  $full"
                 [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" -n "$ns" delete rolebinding "$name" --ignore-not-found --timeout=20s
+              fi
+            done
+
+          # **NEW**: Roles
+          echo "=== Deleting non-standard Roles ==="
+          KEEP_ROLES_RE='^(kube-public/system:controller:bootstrap-signer|kube-system/(extension-apiserver-authentication-reader|system:.*|system::.*))$'
+          kubectl --context=${{ env.ADMIN_CTX }} get role -A \
+            -o custom-columns="NS:.metadata.namespace,NAME:.metadata.name" --no-headers \
+          | while read -r ns name; do
+              full="$ns/$name"
+              if [[ $full =~ $KEEP_ROLES_RE ]]; then
+                echo " keeping Role: $full"
+              else
+                echo " deleting Role: $full"
+                [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" -n "$ns" delete role "$name" --ignore-not-found --timeout=20s
               fi
             done
 
