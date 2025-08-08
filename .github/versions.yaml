@@ -6,6 +6,7 @@ kubeconform: v0.6.4
 kyverno: v1.12.4
 yq: v4.43.1
 trivy: 0.50.1
+traefik: 2.10.4
 TRIVY_CACHE_DIR: /tmp/trivy-cache
 HELM_PLUGIN_DIR: ~/.local/share/helm/plugins
 KUBECTL_CONTEXT: remote-cloudflare

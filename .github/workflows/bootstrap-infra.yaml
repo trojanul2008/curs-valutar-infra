@@ -153,12 +153,23 @@ jobs:
       - name: Install Traefik
         run: |
           set -euo pipefail
+
+          # Read chart version from versions.yaml
+          TRAEFIK_CHART_VERSION=$(yq e '.traefik' .github/versions.yaml)
+          echo "🔖 Using Traefik chart version: $TRAEFIK_CHART_VERSION"
+
+          # Add & refresh repo
           helm repo add traefik https://helm.traefik.io/traefik
           helm repo update
-          kubectl create ns traefik 2>/dev/null || echo "✔️ Namespace 'traefik' already present"
+
+          # Ensure namespace exists
+          kubectl create ns traefik 2>/dev/null \
+            || echo "✔️ Namespace 'traefik' already present"
+
+          # Install/upgrade Traefik at the pinned version
           helm upgrade --install traefik traefik/traefik \
             --namespace traefik \
-            --version 2.10.3 \
+            --version "$TRAEFIK_CHART_VERSION" \
             --set additionalArguments="{--providers.kubernetescrd}" \
             --wait \
             --timeout=300s
