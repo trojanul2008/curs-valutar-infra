@@ -169,14 +169,23 @@ jobs:
           set -euo pipefail
           set -x
 
+          # --- CRDs ---
           echo "=== Deleting CRDs except k3s-managed ==="
-          kubectl --context=${{ env.ADMIN_CTX }} get crd -o name | tee /tmp/crds.txt
-          grep -v 'k3s.cattle.io' /tmp/crds.txt | while read crd; do
-            echo " deleting $crd"
-            kubectl --context=${{ env.ADMIN_CTX }} delete "$crd" \
-              --ignore-not-found --timeout=60s || echo "  ❌ failed"
-          done
+          ALL_CRDS=$(kubectl --context=${{ env.ADMIN_CTX }} get crd -o name)
+          TO_DELETE=$(echo "$ALL_CRDS" | grep -v 'k3s.cattle.io' || true)
+          if [[ -n "$TO_DELETE" ]]; then
+            echo "Found CRDs to delete:"
+            echo "$TO_DELETE"
+            while read crd; do
+              echo " deleting $crd"
+              kubectl --context=${{ env.ADMIN_CTX }} delete "$crd" \
+                --ignore-not-found --timeout=60s || echo "  ❌ failed to delete $crd"
+            done <<<"$TO_DELETE"
+          else
+            echo "No non-k3s CRDs to delete"
+          fi
 
+          # --- Webhooks ---
           echo "=== Deleting webhook configurations ==="
           for w in mutatingwebhookconfiguration validatingwebhookconfiguration; do
             echo " deleting all $w"
@@ -184,8 +193,8 @@ jobs:
               --all --ignore-not-found --timeout=30s || echo "  ❌ failed"
           done
 
+          # --- APIService ---
           echo "=== Deleting selected APIService definitions ==="
-          # capture & filter, but never fail if empty
           APISVCS=$(kubectl --context=${{ env.ADMIN_CTX }} get apiservice -o name \
                     | grep -E '(helm|traffic|kyverno)' || true)
           if [[ -n "$APISVCS" ]]; then
@@ -200,18 +209,26 @@ jobs:
             echo " No matching APIServices (helm|traffic|kyverno)"
           fi
 
+          # --- PersistentVolumes ---
           echo "=== Deleting all PersistentVolumes ==="
           kubectl --context=${{ env.ADMIN_CTX }} delete pv \
             --all --ignore-not-found --timeout=30s || true
 
+          # --- StorageClasses ---
           echo "=== Deleting storageclasses except local-path-storage ==="
-          kubectl --context=${{ env.ADMIN_CTX }} get storageclass -o name \
-            | tee /tmp/scs.txt
-          grep -v 'local-path-storage' /tmp/scs.txt | while read sc; do
-            echo " deleting $sc"
-            kubectl --context=${{ env.ADMIN_CTX }} delete "$sc" \
-              --ignore-not-found --timeout=30s || echo "  ❌ failed"
-          done
+          ALL_SCS=$(kubectl --context=${{ env.ADMIN_CTX }} get storageclass -o name)
+          TO_DELETE_SCS=$(echo "$ALL_SCS" | grep -v 'local-path-storage' || true)
+          if [[ -n "$TO_DELETE_SCS" ]]; then
+            echo "Found storageclasses to delete:"
+            echo "$TO_DELETE_SCS"
+            while read sc; do
+              echo " deleting $sc"
+              kubectl --context=${{ env.ADMIN_CTX }} delete "$sc" \
+                --ignore-not-found --timeout=30s || echo "  ❌ failed"
+            done <<<"$TO_DELETE_SCS"
+          else
+            echo "No storageclasses to delete (other than local-path-storage)"
+          fi
 
       - name: Cleanup teardown-admin binding
         if: always()
