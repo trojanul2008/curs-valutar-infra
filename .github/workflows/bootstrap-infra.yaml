@@ -129,7 +129,7 @@ jobs:
               NOT_FOUND+=("$DEPLOY")
               continue
             fi
-            if ! kubectl rollout status deployment/"$DEPLOY" -n kyverno --timeout=10s; then
+            if ! kubectl rollout status deployment/"$DEPLOY" -n kyverno --timeout=5s; then
               echo "⚠️ '$DEPLOY' timed out"
               TIMEOUT+=("$DEPLOY")
             else
@@ -150,10 +150,15 @@ jobs:
           echo "🚦 Rollout check complete."
 
       # 10. Install Traefik
+      - name: Prune stale Traefik IngressClass
+        run: |
+          # remove the old cluster-wide IngressClass so Helm can claim it
+          kubectl delete ingressclass traefik --ignore-not-found
+
       - name: Install Traefik
         run: |
           set -euo pipefail
-
+          set -x
           # Read chart version from versions.yaml
           # TRAEFIK_APP=$(yq e '.traefikApp' .github/versions.yaml)
           # TRAEFIK_CHART=$(yq e '.traefikChart' .github/versions.yaml)
