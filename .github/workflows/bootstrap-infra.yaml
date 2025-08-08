@@ -129,7 +129,7 @@ jobs:
               NOT_FOUND+=("$DEPLOY")
               continue
             fi
-            if ! kubectl rollout status deployment/"$DEPLOY" -n kyverno --timeout=60s; then
+            if ! kubectl rollout status deployment/"$DEPLOY" -n kyverno --timeout=20s; then
               echo "⚠️ '$DEPLOY' timed out"
               TIMEOUT+=("$DEPLOY")
             else
@@ -155,21 +155,22 @@ jobs:
           set -euo pipefail
 
           # Read chart version from versions.yaml
-          TRAEFIK_CHART_VERSION=$(yq e '.traefik' .github/versions.yaml)
-          echo "🔖 Using Traefik chart version: $TRAEFIK_CHART_VERSION"
+          TRAEFIK_APP=$(yq e '.traefikApp' .github/versions.yaml)
+          TRAEFIK_CHART=$(yq e '.traefikChart' .github/versions.yaml)
+          echo "📦 app version: $TRAEFIK_APP   chart version: $TRAEFIK_CHART"
+          echo "🔖 Using Traefik chart version: $TRAEFIK_CHART"
 
           # Add & refresh repo
           helm repo add traefik https://helm.traefik.io/traefik
           helm repo update
-
-          # Ensure namespace exists
-          kubectl create ns traefik 2>/dev/null \
-            || echo "✔️ Namespace 'traefik' already present"
+          kubectl create ns traefik || true
+          echo "✔️ Namespace 'traefik' already present"
 
           # Install/upgrade Traefik at the pinned version
           helm upgrade --install traefik traefik/traefik \
             --namespace traefik \
-            --version "$TRAEFIK_CHART_VERSION" \
+            --version "$TRAEFIK_CHART" \
+            --set image.tag="$TRAEFIK_APP" \
             --set additionalArguments="{--providers.kubernetescrd}" \
             --wait \
             --timeout=300s
