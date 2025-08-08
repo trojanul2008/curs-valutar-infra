@@ -129,25 +129,32 @@ jobs:
           [[ "$NS" == "both" ]] && LIST=(dev prod)
           [[ "$FULL" == "FULL" ]] && LIST+=(flux-system kyverno)
 
-          for N in "${LIST[@]}"; do
-            echo "=== cleaning namespaced resources in: $N ==="
-            KINDS=$(kubectl --context=${{ env.ADMIN_CTX }} \
-              api-resources --namespaced=true --verbs=list -o name)
-            echo " Found kinds to sweep: $KINDS"
-            for kind in $KINDS; do
-              echo "  → checking $kind in $N"
-              # list existing objects of that kind
-              RESOURCES=$(kubectl --context=${{ env.ADMIN_CTX }} get "$kind" -n "$N" -o name 2>/dev/null || echo "")
-              if [[ -n "$RESOURCES" ]]; then
-                echo "    found resources: $RESOURCES"
-                echo "    deleting all $kind in $N"
-                kubectl --context=${{ env.ADMIN_CTX }} delete "$kind" \
-                  -n "$N" --all --ignore-not-found || echo "      ❌ deletion failed"
-              else
-                echo "    no resources of type $kind"
-              fi
+          # Bail out after 3 minutes if this step hangs
+          timeout 3m bash -c "
+            for N in \"\${LIST[@]}\"; do
+              echo \"=== cleaning namespaced resources in: \$N ===\"
+              KINDS=\$(kubectl --context=${{ env.ADMIN_CTX }} \
+                api-resources --namespaced=true --verbs=list -o name)
+              echo \" Found kinds to sweep: \$KINDS\"
+
+              for kind in \$KINDS; do
+                echo \"  → checking \$kind in \$N\"
+                RESOURCES=\$(kubectl --context=${{ env.ADMIN_CTX }} get \"\$kind\" \
+                  -n \"\$N\" -o name 2>/dev/null || echo \"\")
+                if [[ -n \"\$RESOURCES\" ]]; then
+                  echo \"    found: \$RESOURCES\"
+                  for res in \$RESOURCES; do
+                    echo \"      force-deleting \$res\"
+                    kubectl --context=${{ env.ADMIN_CTX }} delete \"\$res\" \
+                      --force --grace-period=0 --ignore-not-found || \
+                      echo \"        ❌ failed to force-delete \$res\"
+                  done
+                else
+                  echo \"    no resources of type \$kind\"
+                fi
+              done
             done
-          done
+          "
 
       - name: Strip stuck CRD finalizers
         if: ${{ inputs.full == 'FULL' }}
