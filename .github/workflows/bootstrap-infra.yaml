@@ -105,7 +105,7 @@ jobs:
             --namespace kyverno \
             --set installCRDs=true \
             --wait \
-            --timeout=60s \
+            #--timeout=60s \
             --no-hooks \
             --debug
           kubectl delete job kyverno-clean-reports -n kyverno || true
@@ -179,7 +179,7 @@ jobs:
             --set image.tag="$TRAEFIK_APP" \
             --set additionalArguments="{--providers.kubernetescrd}" \
             --wait \
-            --timeout=60s
+            --timeout=60s \
             --kube-apiserver-timeout=60s
 
       # 11. Clean up any Flux CRDs stuck in Terminating
