@@ -15,6 +15,10 @@ on:
         description: "Type FULL to also wipe cluster-scoped resources (CRDs, webhook configs, PVs, etc.)"
         required: false
         default: ""
+      dry_run:
+        description: "true = just print what would be deleted; false = actually delete"
+        required: true
+        default: "true"
 
 jobs:
   reset:
