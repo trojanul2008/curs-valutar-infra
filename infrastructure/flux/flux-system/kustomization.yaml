@@ -10,13 +10,13 @@ resources:
   - manifests/curs-valutar-prod.yaml
 
   # NOTE: Temporarily DISABLED until image controllers are installed
-  # - manifests/image-repository.yaml
-  # - manifests/image-policy-dev.yaml
-  # - manifests/image-policy.yaml
-  # - manifests/image-update-automation-dev.yaml
-  # - manifests/image-update-automation.yaml
+  - manifests/image-repository.yaml
+  - manifests/image-policy-dev.yaml
+  - manifests/image-policy.yaml
+  - manifests/image-update-automation-dev.yaml
+  - manifests/image-update-automation.yaml
 
   # NOTE: Remove these unless you actually create them
   # - manifests/source-prod.yaml
   # - manifests/prod-kustom.yaml
-
+  - manifests/flux-controllers.yaml
