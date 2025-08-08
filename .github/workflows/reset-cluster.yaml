@@ -20,7 +20,7 @@ jobs:
   reset:
     runs-on: ubuntu-latest
     env:
-      ADMIN_CTX: k3s-admin
+      ADMIN_CTX: remote-cloudflare
 
     steps:
       - name: Checkout repo
@@ -69,13 +69,13 @@ jobs:
           # Use $HOME instead of ~ so GitHub Actions expands it properly
           echo "KUBECONFIG=$HOME/.kube/remote-config:$HOME/.kube/admin-config" >> $GITHUB_ENV
 
-      - name: Create k3s-admin context
-        run: |
-          # Tell kubectl “there is” a k3s-admin context pointing at your admin-config
-          KUBECONFIG=$HOME/.kube/admin-config \
-            kubectl config set-context k3s-admin \
-              --cluster=default \
-              --user=default
+          #      - name: Create k3s-admin context
+          #        run: |
+          #          # Tell kubectl “there is” a k3s-admin context pointing at your admin-config
+          #          KUBECONFIG=$HOME/.kube/admin-config \
+          #            kubectl config set-context k3s-admin \
+          #              --cluster=default \
+          #              --user=default
 
       - name: Debug show all contexts
         run: |
