@@ -105,7 +105,7 @@ jobs:
             --namespace kyverno \
             --set installCRDs=true \
             --wait \
-            --timeout=300s \
+            --timeout=60s \
             --no-hooks \
             --debug
           kubectl delete job kyverno-clean-reports -n kyverno || true
@@ -160,8 +160,6 @@ jobs:
           set -euo pipefail
           set -x
           # Read chart version from versions.yaml
-          # TRAEFIK_APP=$(yq e '.traefikApp' .github/versions.yaml)
-          # TRAEFIK_CHART=$(yq e '.traefikChart' .github/versions.yaml)
           TRAEFIK_APP=$(yq e -r '.traefikApp' .github/versions.yaml | sed 's/^v//')
           TRAEFIK_CHART=$(yq e -r '.traefikChart' .github/versions.yaml | sed 's/^v//')
 
@@ -181,7 +179,8 @@ jobs:
             --set image.tag="$TRAEFIK_APP" \
             --set additionalArguments="{--providers.kubernetescrd}" \
             --wait \
-            --timeout=300s
+            --timeout=60s
+            --kube-apiserver-timeout=60s
 
       # 11. Clean up any Flux CRDs stuck in Terminating
       - name: Cleanup stuck Flux CRDs
