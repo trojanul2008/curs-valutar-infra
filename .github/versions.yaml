@@ -6,8 +6,8 @@ kubeconform: v0.6.4
 kyverno: v1.12.4
 yq: v4.43.1
 trivy: 0.50.1
-traefikApp: 2.10.4
-traefikChart: 19.4.5
+traefikApp: v3.5.0
+traefikChart: 37.0.0
 TRIVY_CACHE_DIR: /tmp/trivy-cache
 HELM_PLUGIN_DIR: ~/.local/share/helm/plugins
 KUBECTL_CONTEXT: remote-cloudflare

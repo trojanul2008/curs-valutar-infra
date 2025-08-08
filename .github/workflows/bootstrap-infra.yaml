@@ -129,7 +129,7 @@ jobs:
               NOT_FOUND+=("$DEPLOY")
               continue
             fi
-            if ! kubectl rollout status deployment/"$DEPLOY" -n kyverno --timeout=20s; then
+            if ! kubectl rollout status deployment/"$DEPLOY" -n kyverno --timeout=10s; then
               echo "⚠️ '$DEPLOY' timed out"
               TIMEOUT+=("$DEPLOY")
             else
@@ -155,8 +155,11 @@ jobs:
           set -euo pipefail
 
           # Read chart version from versions.yaml
-          TRAEFIK_APP=$(yq e '.traefikApp' .github/versions.yaml)
-          TRAEFIK_CHART=$(yq e '.traefikChart' .github/versions.yaml)
+          # TRAEFIK_APP=$(yq e '.traefikApp' .github/versions.yaml)
+          # TRAEFIK_CHART=$(yq e '.traefikChart' .github/versions.yaml)
+          TRAEFIK_APP=$(yq e -r '.traefikApp' .github/versions.yaml | sed 's/^v//')
+          TRAEFIK_CHART=$(yq e -r '.traefikChart' .github/versions.yaml | sed 's/^v//')
+
           echo "📦 app version: $TRAEFIK_APP   chart version: $TRAEFIK_CHART"
           echo "🔖 Using Traefik chart version: $TRAEFIK_CHART"
 
