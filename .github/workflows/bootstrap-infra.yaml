@@ -152,34 +152,81 @@ jobs:
       # 10. Install Traefik
       - name: Prune stale Traefik IngressClass
         run: |
-          # remove the old cluster-wide IngressClass so Helm can claim it
-          kubectl delete ingressclass traefik --ignore-not-found
+          set -euo pipefail
+          echo "::group::Prune IngressClass 'traefik'"
+          echo "📋 Before prune:"
+          kubectl get ingressclass -oyaml || true
+          if kubectl get ingressclass traefik >/dev/null 2>&1; then
+            echo "🗑️ Deleting ingressclass/traefik..."
+            START=$(date +%s)
+            kubectl delete ingressclass traefik --timeout=30s || true
+            # If still present, inspect and remove finalizers
+            if kubectl get ingressclass traefik >/dev/null 2>&1; then
+              echo "⚠️ Still present after delete — checking finalizers and events"
+              kubectl get ingressclass traefik -oyaml
+              kubectl get events --sort-by=.lastTimestamp -A | tail -n 100 || true
+              echo "🔧 Patching out finalizers (if any)"
+              kubectl patch ingressclass traefik --type=merge -p '{"metadata":{"finalizers":[]}}' || true
+              kubectl delete ingressclass traefik --ignore-not-found --timeout=30s || true
+            fi
+            END=$(date +%s)
+            echo "⏱️ Prune duration: $((END-START))s"
+          else
+            echo "ℹ️ ingressclass/traefik not found — nothing to prune"
+          fi
+          echo "📋 After prune:"
+          kubectl get ingressclass || true
+          echo "::endgroup::"
 
       - name: Install Traefik
         run: |
           set -euo pipefail
-          set -x
-          # Read chart version from versions.yaml
+          echo "::group::Resolve versions"
           TRAEFIK_APP=$(yq e -r '.traefikApp' .github/versions.yaml | sed 's/^v//')
           TRAEFIK_CHART=$(yq e -r '.traefikChart' .github/versions.yaml | sed 's/^v//')
-
           echo "📦 app version: $TRAEFIK_APP   chart version: $TRAEFIK_CHART"
-          echo "🔖 Using Traefik chart version: $TRAEFIK_CHART"
-
-          # Add & refresh repo
-          helm repo add traefik https://helm.traefik.io/traefik
-          helm repo update
-          kubectl create ns traefik || true
-          echo "✔️ Namespace 'traefik' already present"
-
-          # Install/upgrade Traefik at the pinned version
+          echo "::endgroup::"
+          echo "::group::Prepare repo and namespace"
+          helm repo add traefik https://helm.traefik.io/traefik >/dev/null
+          helm repo update >/dev/null
+          kubectl create ns traefik 2>/dev/null || echo "✔️ Namespace 'traefik' already present"
+          echo "::endgroup::"
+          # On failure, dump as much context as possible
+          dump_debug() {
+            echo "::group::Traefik debug dump"
+            kubectl get all -n traefik -o wide || true
+            kubectl get events -n traefik --sort-by=.lastTimestamp | tail -n 200 || true
+            kubectl describe deployment traefik -n traefik || true
+            kubectl describe svc -n traefik || true
+            kubectl get ingressclass -oyaml || true
+            # Pod logs (best-effort)
+            for p in $(kubectl get pods -n traefik -o name 2>/dev/null); do
+              echo "--- logs for $p"
+              kubectl logs "$p" -n traefik --tail=200 || true
+            done
+            echo "::endgroup::"
+          }
+          trap 'dump_debug' ERR
+          echo "::group::Helm upgrade/install Traefik"
+          START=$(date +%s)
           helm upgrade --install traefik traefik/traefik \
-          --namespace traefik \
-          --version "$TRAEFIK_CHART" \
-          --set image.tag="$TRAEFIK_APP" \
-          --set additionalArguments="{--providers.kubernetescrd}" \
-          --wait \
-          --timeout=60s
+            --namespace traefik \
+            --version "$TRAEFIK_CHART" \
+            --set image.tag="$TRAEFIK_APP" \
+            --set additionalArguments="{--providers.kubernetescrd}" \
+            --wait \
+            --timeout=600s \
+            --atomic \
+            --debug
+          END=$(date +%s)
+          echo "⏱️ Helm install duration: $((END-START))s"
+          echo "::endgroup::"
+          echo "::group::Post-install verification"
+          kubectl rollout status deployment/traefik -n traefik --timeout=180s
+          kubectl get pods -n traefik -o wide
+          kubectl get svc -n traefik -o wide
+          kubectl get events -n traefik --sort-by=.lastTimestamp | tail -n 100
+          echo "::endgroup::"
 
       # 11. Clean up any Flux CRDs stuck in Terminating
       - name: Cleanup stuck Flux CRDs
