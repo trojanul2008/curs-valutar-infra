@@ -53,12 +53,11 @@ jobs:
           if [[ -z "${{ secrets.K3S_ADMIN_KUBECONFIG }}" ]]; then
             echo "❌ Missing K3S_ADMIN_KUBECONFIG secret"; exit 1
           fi
-
-          # Decode both kubeconfigs into separate files
           echo "${{ secrets.KUBE_CONFIG_CLOUDFLARE }}" \
             | base64 --decode > ~/.kube/remote-config
           echo "${{ secrets.K3S_ADMIN_KUBECONFIG }}" \
             | base64 --decode > ~/.kube/admin-config
+
       - name: Debug secret lengths
         run: |
           echo -n "admin config bytes: "; echo -n "${{ secrets.K3S_ADMIN_KUBECONFIG }}" | wc -c
@@ -66,16 +65,8 @@ jobs:
 
       - name: Expose merged KUBECONFIG for all steps
         run: |
-          # Use $HOME instead of ~ so GitHub Actions expands it properly
+          # Use $HOME, not ~, so it expands correctly in GitHub Actions
           echo "KUBECONFIG=$HOME/.kube/remote-config:$HOME/.kube/admin-config" >> $GITHUB_ENV
-
-          #      - name: Create k3s-admin context
-          #        run: |
-          #          # Tell kubectl “there is” a k3s-admin context pointing at your admin-config
-          #          KUBECONFIG=$HOME/.kube/admin-config \
-          #            kubectl config set-context k3s-admin \
-          #              --cluster=default \
-          #              --user=default
 
       - name: Debug show all contexts
         run: |
@@ -84,7 +75,6 @@ jobs:
 
       - name: Patch remote cluster entry & skip TLS verify
         run: |
-          # ensure the remote-cloudflare context’s cluster endpoint is correct
           kubectl --context=remote-cloudflare config set-cluster remote \
             --server=https://api.istartit.com:443 \
             --insecure-skip-tls-verify=true
@@ -100,6 +90,8 @@ jobs:
       - name: Wipe namespaces
         run: |
           set -euo pipefail
+          set -x
+
           NS="${{ inputs.namespace }}"
           FULL="${{ inputs.full }}"
           TARGETS=("$NS")
@@ -108,19 +100,28 @@ jobs:
 
           echo "Deleting namespaces: ${TARGETS[*]}"
           for N in "${TARGETS[@]}"; do
-            kubectl --context=remote-cloudflare delete ns "$N" \
+            echo "=== processing namespace: $N ==="
+            kubectl --context=${{ env.ADMIN_CTX }} delete ns "$N" \
               --ignore-not-found --wait=false
 
             for i in {1..30}; do
+              echo " waiting for $N to disappear (attempt $i)"
               sleep 2
-              ! kubectl --context=remote-cloudflare get ns "$N" &>/dev/null && break
+              ! kubectl --context=${{ env.ADMIN_CTX }} get ns "$N" &>/dev/null && break
             done
 
-            if kubectl --context=remote-cloudflare get ns "$N" &>/dev/null; then
-              kubectl --context=remote-cloudflare get ns "$N" -o json \
+            echo "attempting finalizers cleanup for $N"
+            RAW=$(kubectl --context=${{ env.ADMIN_CTX }} get ns "$N" -o json 2>/dev/null || echo "")
+            echo "RAW JSON for $N: '$RAW'"
+
+            if [[ -n "$RAW" ]]; then
+              echo "$RAW" | jq .
+              echo "$RAW" \
                 | jq 'del(.spec.finalizers)' \
-                | kubectl --context=remote-cloudflare \
+                | kubectl --context=${{ env.ADMIN_CTX }} \
                     replace --raw "/api/v1/namespaces/$N/finalize" -f -
+            else
+              echo " no raw JSON found for $N, skipping finalize"
             fi
           done
 
@@ -133,9 +134,9 @@ jobs:
           [[ "$FULL" == "FULL" ]] && LIST+=(flux-system kyverno)
 
           for N in "${LIST[@]}"; do
-            for kind in $(kubectl --context=remote-cloudflare \
+            for kind in $(kubectl --context=${{ env.ADMIN_CTX }} \
               api-resources --namespaced=true --verbs=list -o name); do
-              kubectl --context=remote-cloudflare delete "$kind" \
+              kubectl --context=${{ env.ADMIN_CTX }} delete "$kind" \
                 -n "$N" --all --ignore-not-found || true
             done
           done
@@ -143,8 +144,8 @@ jobs:
       - name: Strip stuck CRD finalizers
         if: ${{ inputs.full == 'FULL' }}
         run: |
-          for crd in $(kubectl --context=remote-cloudflare get crd -o name); do
-            kubectl --context=remote-cloudflare patch "$crd" \
+          for crd in $(kubectl --context=${{ env.ADMIN_CTX }} get crd -o name); do
+            kubectl --context=${{ env.ADMIN_CTX }} patch "$crd" \
               --type=merge -p '{"metadata":{"finalizers":[]}}' || true
           done
 
@@ -153,30 +154,30 @@ jobs:
         run: |
           set -euo pipefail
           echo "Deleting CRDs except k3s-managed"
-          kubectl --context=remote-cloudflare get crd -o name \
+          kubectl --context=${{ env.ADMIN_CTX }} get crd -o name \
             | grep -v 'k3s.cattle.io' \
-            | xargs -r kubectl --context=remote-cloudflare delete \
+            | xargs -r kubectl --context=${{ env.ADMIN_CTX }} delete \
                 --ignore-not-found --timeout=60s
 
           echo "Deleting webhook configurations"
-          kubectl --context=remote-cloudflare delete \
+          kubectl --context=${{ env.ADMIN_CTX }} delete \
             mutatingwebhookconfiguration,validatingwebhookconfiguration \
             --all --ignore-not-found --timeout=30s
 
           echo "Deleting selected APIService definitions"
-          kubectl --context=remote-cloudflare get apiservice -o name \
+          kubectl --context=${{ env.ADMIN_CTX }} get apiservice -o name \
             | grep -E '(helm|traffic|kyverno)' \
-            | xargs -r kubectl --context=remote-cloudflare delete \
+            | xargs -r kubectl --context=${{ env.ADMIN_CTX }} delete \
                 --ignore-not-found --timeout=30s
 
           echo "Deleting all PersistentVolumes"
-          kubectl --context=remote-cloudflare delete pv \
+          kubectl --context=${{ env.ADMIN_CTX }} delete pv \
             --all --ignore-not-found --timeout=30s
 
           echo "Deleting storageclasses except local-path-storage"
-          kubectl --context=remote-cloudflare get storageclass -o name \
+          kubectl --context=${{ env.ADMIN_CTX }} get storageclass -o name \
             | grep -v 'local-path-storage' \
-            | xargs -r kubectl --context=remote-cloudflare delete \
+            | xargs -r kubectl --context=${{ env.ADMIN_CTX }} delete \
                 --ignore-not-found --timeout=30s
 
       - name: Cleanup teardown-admin binding
