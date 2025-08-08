@@ -25,7 +25,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ADMIN_CTX: remote-cloudflare
-      DRY_RUN: "true"
 
     steps:
       - name: Checkout repo
@@ -47,7 +46,11 @@ jobs:
           if [[ "$FULL" == "FULL" && "$CONF" != "YES" ]]; then
             echo "❌ Type YES for a FULL wipe."; exit 1
           fi
-          echo "✅ Inputs ok: namespace=$NS, full=$FULL, dry-run=$DRY_RUN"
+          echo "✅ Inputs ok: namespace=$NS, full=$FULL, dry-run=${{ inputs.dry_run }}"
+
+      - name: Expose dry-run flag
+        run: |
+          echo "DRY_RUN=${{ inputs.dry_run }}" >> $GITHUB_ENV
 
       - name: Decode kubeconfigs
         run: |
@@ -197,21 +200,10 @@ jobs:
 
           # ClusterRoleBindings
           echo "=== Deleting non-standard ClusterRoleBindings ==="
-          KEEP_CRBS=(
-            cluster-admin
-            k3s-cloud-controller-manager
-            k3s-cloud-controller-manager-auth-delegator
-            kube-apiserver-kubelet-admin
-            cloudflare-user-basic
-            cloudflare-user-cluster-admin
-            clustercidrs-node
-            local-path-provisioner-bind
-            metrics-server:system:auth-delegator
-            remote-admin-binding
-          )
+          KEEP_RE='^(cluster-admin|k3s:.*|system:.*|cloudflare-user-.*|clustercidrs-node|local-path-provisioner-bind|metrics-server:system:auth-delegator|remote-admin-binding)$'
           for crb in $(kubectl --context=${{ env.ADMIN_CTX }} get clusterrolebinding -o name); do
             name=$(basename "$crb")
-            if [[ " ${KEEP_CRBS[*]} " =~ " ${name} " ]]; then
+            if [[ $name =~ $KEEP_RE ]]; then
               echo " keeping CRB: $crb"
             else
               echo " deleting CRB: $crb"
@@ -221,30 +213,18 @@ jobs:
 
           # RoleBindings
           echo "=== Deleting non-standard RoleBindings ==="
-          KEEP_RBS=(
-            default/github-runner-edit
-            kube-system/metrics-server-auth-reader
-            kube-system/system:.*
-            kube-system/k3s:.*
-            kube-system/extension:.*
-            remote-admin-binding
-          )
-          while read -r ns name; do
-            full="$ns/$name"
-            keep=false
-            for pat in "${KEEP_RBS[@]}"; do
-              if [[ "$full" =~ ^$pat$ ]]; then
-                keep=true
-                break
+          KEEP_RE='^(default/github-runner-edit|remote-admin-binding|kube-system/metrics-server-auth-reader|kube-system/system:.*|kube-system/k3s:.*|kube-system/extension:.*)$'
+          kubectl --context=${{ env.ADMIN_CTX }} get rolebinding -A \
+            -o custom-columns="NS:.metadata.namespace,NAME:.metadata.name" --no-headers \
+          | while read -r ns name; do
+              full="$ns/$name"
+              if [[ $full =~ $KEEP_RE ]]; then
+                echo " keeping RB: $full"
+              else
+                echo " deleting RB:  $full"
+                [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" -n "$ns" delete rolebinding "$name" --ignore-not-found --timeout=20s
               fi
             done
-            if $keep; then
-              echo " keeping RB: $full"
-            else
-              echo " deleting RB: $full"
-              [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" -n "$ns" delete rolebinding "$name" --ignore-not-found --timeout=20s
-            fi
-          done < <(kubectl --context=${{ env.ADMIN_CTX }} get rolebinding -A -o custom-columns="NS:.metadata.namespace,NAME:.metadata.name" --no-headers)
 
       - name: Cleanup teardown-admin binding
         if: always()
