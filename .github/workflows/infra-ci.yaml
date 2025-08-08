@@ -7,7 +7,10 @@ on:
     branches: [ dev, prod ]
   workflow_dispatch:
 
-# Centralize version and path variables by reading .github/versions.yaml once
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   versions:
     name: 🔎 Load versions from versions.yaml
@@ -54,7 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v2.2.0
+        uses: gitleaks/gitleaks-action@v2.3.7
         with:
           args: --redact --report-format json --report-path gitleaks-report.json
       - name: Upload Gitleaks report
@@ -67,7 +70,7 @@ jobs:
   lint:
     name: 🧹 YAML Lint
     runs-on: ubuntu-latest
-    needs: [versions, secret_scan]
+    needs: [ versions, secret_scan ]
     env:
       KUSTOMIZE_VERSION: ${{ needs.versions.outputs.kustomize }}
       KUBECONFORM_VERSION: ${{ needs.versions.outputs.kubeconform }}
@@ -78,7 +81,7 @@ jobs:
       KUBECTL_CONTEXT: ${{ needs.versions.outputs.KUBECTL_CONTEXT }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
       - name: Install dependencies
@@ -91,10 +94,10 @@ jobs:
   schema:
     name: 📐 Schema Validation
     runs-on: ubuntu-latest
-    needs: lint
+    needs: [ lint, versions ]
     strategy:
       matrix:
-        overlay: [dev, prod]
+        overlay: [ dev, prod ]
     env:
       KUSTOMIZE_VERSION: ${{ needs.versions.outputs.kustomize }}
       KUBECONFORM_VERSION: ${{ needs.versions.outputs.kubeconform }}
@@ -118,10 +121,10 @@ jobs:
   policy:
     name: 🚨 Kyverno Policy Check
     runs-on: ubuntu-latest
-    needs: schema
+    needs: [ schema, versions ]
     strategy:
       matrix:
-        overlay: [dev, prod]
+        overlay: [ dev, prod ]
     env:
       KYVERNO_VERSION: ${{ needs.versions.outputs.kyverno }}
       KUSTOMIZE_VERSION: ${{ needs.versions.outputs.kustomize }}
@@ -154,29 +157,31 @@ jobs:
           if [ "$FAIL_COUNT" -gt 0 ]; then
             echo "🚨 Kyverno found $FAIL_COUNT policy violation(s)!"
             jq -c '
-              .results | map(select(.result == "fail"))
+              .results
+              | map(select(.result == "fail"))
               | sort_by(
-                  if   ((.policy|type=="string") and (.policy|test("security")))
-                    or ((.rule|type=="string")   and (.rule|test("privilege")))
+                  if   ((.policy | type=="string") and (.policy | test("security")))
+                    or ((.rule   | type=="string") and (.rule   | test("privilege")))
                   then 1
-                  elif ((.policy|type=="string") and (.policy|test("label")))
-                    or ((.rule|type=="string")   and (.rule|test("label")))
+                  elif ((.policy | type=="string") and (.policy | test("label")))
+                    or ((.rule   | type=="string") and (.rule   | test("label")))
                   then 3
                   else 2
                   end
-                ) | .[]
+                )
+              | .[]
             ' kyverno-results.json > kyverno-violations.json
             COMMENT_BODY="🚨 **Kyverno Policy Violations**\n\n"
             while IFS= read -r violation; do
-              POLICY=$(echo "$violation" | jq -r '.policy')
+              POLICY=$(echo "$violation"   | jq -r '.policy')
               RESOURCE_KIND=$(echo "$violation" | jq -r '.resources[0].kind')
               RESOURCE_NAME=$(echo "$violation" | jq -r '.resources[0].name')
-              RESOURCE_NS=$(echo "$violation" | jq -r '.resources[0].namespace')
-              RULE=$(echo "$violation" | jq -r '.rule')
-              MESSAGE=$(echo "$violation" | jq -r '.message')
+              RESOURCE_NS=$(echo "$violation"   | jq -r '.resources[0].namespace')
+              RULE=$(echo "$violation"     | jq -r '.rule')
+              MESSAGE=$(echo "$violation"  | jq -r '.message')
               SEVERITY="🟠"
-              [[ "$RULE" == *"privilege"* || "$POLICY" == *"security"* ]] && SEVERITY="🔴"
-              [[ "$RULE" == *"label"*     || "$POLICY" == *"label"*    ]] && SEVERITY="🟢"
+              [[ "$RULE"   == *"privilege"* || "$POLICY" == *"security"* ]] && SEVERITY="🔴"
+              [[ "$RULE"   == *"label"*     || "$POLICY" == *"label"*    ]] && SEVERITY="🟢"
               echo ""
               echo "$SEVERITY $RESOURCE_KIND \"$RESOURCE_NAME\" in namespace \"$RESOURCE_NS\""
               echo "    ├─ Policy: $POLICY"
@@ -204,7 +209,7 @@ jobs:
     needs: policy
     strategy:
       matrix:
-        overlay: [dev, prod]
+        overlay: [ dev, prod ]
     if: needs.policy.result == 'success'
     runs-on: ubuntu-latest
     steps:
@@ -270,7 +275,7 @@ jobs:
   scan:
     name: "🛡️ Container Image Scan"
     runs-on: ubuntu-latest
-    needs: policy
+    needs: [ policy, versions ]
     env:
       TRIVY_CACHE_DIR: ${{ needs.versions.outputs.TRIVY_CACHE_DIR }}
       TRIVY_VERSION: ${{ needs.versions.outputs.trivy }}
@@ -317,17 +322,22 @@ jobs:
             trivy-summary.txt
             vulnerability-details.txt
       - name: GitHub PR comment — Trivy summary
-        if: always()
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
             const sevEmoji = (lvl) => lvl === 'CRITICAL' ? '🔴' : '🟠';
-            let raw = fs.readFileSync('trivy-summary.txt', 'utf8').trim();
             let body = '🛡️ **Trivy Vulnerability Summary**\n';
+            let raw = '';
+            try {
+              raw = fs.readFileSync('trivy-summary.txt', 'utf8').trim();
+            } catch {
+              raw = '';
+            }
             if (raw === '✅ No critical vulnerabilities found.') {
               body += '\n✅ No critical vulnerabilities found.\n';
-            } else {
+            } else if (raw.length > 0) {
               let currentImage = null;
               raw.split('\n').forEach(line => {
                 if (line.startsWith('Image:')) {
@@ -340,10 +350,12 @@ jobs:
                   body += `- ${sevEmoji(sev)} **${sev}** — ${cve}\n`;
                 }
               });
+            } else {
+              body += '\n⚠️ No trivy summary available.\n';
             }
             const prNumber = context.payload.pull_request?.number;
             if (prNumber) {
-              github.rest.issues.createComment({
+              await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: prNumber,
@@ -351,14 +363,15 @@ jobs:
               });
             } else {
               console.log('ℹ️ No pull-request context — skipping comment.');
+            }
 
   drift:
     name: 📊 Drift Detection via Flux
     runs-on: ubuntu-latest
-    needs: scan
+    needs: [ scan, versions ]
     strategy:
       matrix:
-        env: [dev, prod]
+        env: [ dev, prod ]
     env:
       HELM_PLUGIN_DIR: ${{ needs.versions.outputs.HELM_PLUGIN_DIR }}
       KUBECTL_CONTEXT: ${{ needs.versions.outputs.KUBECTL_CONTEXT }}
@@ -409,15 +422,16 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const reportFile = `drift-${process.env.MATRIX_ENV}.txt`;
-            let body = `📊 **Flux Drift Report (\`${process.env.MATRIX_ENV}\`)**\n`;
+            const env = process.env.MATRIX_ENV;
+            const reportFile = `drift-${env}.txt`;
+            let body = `📊 **Flux Drift Report (\`${env}\`)**\n`;
             try {
               const content = fs.readFileSync(reportFile, 'utf8').trim();
               const report = content.length === 0 ? '⚠️ No drift report available.' : content.slice(0, 6000);
               body += `\n\`\`\`\n${report}\n\`\`\``;
               const prNumber = context.payload.pull_request?.number;
               if (prNumber) {
-                github.rest.issues.createComment({
+                await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: prNumber,
@@ -425,4 +439,8 @@ jobs:
                 });
               } else {
                 console.log('ℹ️ No pull-request context — skipping comment.');
+              }
+            } catch (err) {
+              console.error(`❌ Failed to read ${reportFile}:`, err.message);
             }
+
