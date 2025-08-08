@@ -292,3 +292,15 @@ jobs:
       # 14. Verify Flux reconciliation
       - name: Verify Flux reconciliation
         run: flux get kustomizations --context=remote-cloudflare
+
+      - name: Manual reconciliation and verification
+        run: |
+          echo "📡 Reconcile source and kustomization"
+          flux reconcile source git flux-system --context=remote-cloudflare
+          flux reconcile kustomization flux-system --context=remote-cloudflare
+      
+          echo "📍 Kustomizations overview:"
+          flux get kustomizations -A --context=remote-cloudflare
+      
+          echo "📦 Deployment status across namespaces:"
+          kubectl --context=remote-cloudflare get deployments -A
