@@ -130,15 +130,22 @@ jobs:
           [[ "$FULL" == "FULL" ]] && LIST+=(flux-system kyverno)
 
           for N in "${LIST[@]}"; do
-            echo "=== cleaning namespaced resources in $N ==="
-            # list all namespaced API resource kinds once
+            echo "=== cleaning namespaced resources in: $N ==="
             KINDS=$(kubectl --context=${{ env.ADMIN_CTX }} \
               api-resources --namespaced=true --verbs=list -o name)
-            echo " Found kinds: $KINDS"
+            echo " Found kinds to sweep: $KINDS"
             for kind in $KINDS; do
-              echo "  -> deleting all $kind in namespace $N"
-              kubectl --context=${{ env.ADMIN_CTX }} delete "$kind" \
-                -n "$N" --all --ignore-not-found || echo "    ❌ delete $kind failed"
+              echo "  → checking $kind in $N"
+              # list existing objects of that kind
+              RESOURCES=$(kubectl --context=${{ env.ADMIN_CTX }} get "$kind" -n "$N" -o name 2>/dev/null || echo "")
+              if [[ -n "$RESOURCES" ]]; then
+                echo "    found resources: $RESOURCES"
+                echo "    deleting all $kind in $N"
+                kubectl --context=${{ env.ADMIN_CTX }} delete "$kind" \
+                  -n "$N" --all --ignore-not-found || echo "      ❌ deletion failed"
+              else
+                echo "    no resources of type $kind"
+              fi
             done
           done
 
@@ -157,18 +164,16 @@ jobs:
           set -x
 
           echo "=== Deleting CRDs except k3s-managed ==="
-          kubectl --context=${{ env.ADMIN_CTX }} get crd -o name \
-            | tee /tmp/crds.txt
-          grep -v 'k3s.cattle.io' /tmp/crds.txt \
-            | while read crd; do
-                echo " deleting $crd"
-                kubectl --context=${{ env.ADMIN_CTX }} delete "$crd" \
-                  --ignore-not-found --timeout=60s || echo "  ❌ failed"
-              done
+          kubectl --context=${{ env.ADMIN_CTX }} get crd -o name | tee /tmp/crds.txt
+          grep -v 'k3s.cattle.io' /tmp/crds.txt | while read crd; do
+            echo " deleting $crd"
+            kubectl --context=${{ env.ADMIN_CTX }} delete "$crd" \
+              --ignore-not-found --timeout=60s || echo "  ❌ failed"
+          done
 
           echo "=== Deleting webhook configurations ==="
           for w in mutatingwebhookconfiguration validatingwebhookconfiguration; do
-            echo " deleting $w"
+            echo " deleting all $w"
             kubectl --context=${{ env.ADMIN_CTX }} delete "$w" \
               --all --ignore-not-found --timeout=30s || echo "  ❌ failed"
           done
@@ -176,12 +181,11 @@ jobs:
           echo "=== Deleting selected APIService definitions ==="
           kubectl --context=${{ env.ADMIN_CTX }} get apiservice -o name \
             | tee /tmp/apiservices.txt
-          grep -E '(helm|traffic|kyverno)' /tmp/apiservices.txt \
-            | while read apisvc; do
-                echo " deleting $apisvc"
-                kubectl --context=${{ env.ADMIN_CTX }} delete "$apisvc" \
-                  --ignore-not-found --timeout=30s || echo "  ❌ failed"
-              done
+          grep -E '(helm|traffic|kyverno)' /tmp/apiservices.txt | while read apisvc; do
+            echo " deleting $apisvc"
+            kubectl --context=${{ env.ADMIN_CTX }} delete "$apisvc" \
+              --ignore-not-found --timeout=30s || echo "  ❌ failed"
+          done
 
           echo "=== Deleting all PersistentVolumes ==="
           kubectl --context=${{ env.ADMIN_CTX }} delete pv \
@@ -190,12 +194,11 @@ jobs:
           echo "=== Deleting storageclasses except local-path-storage ==="
           kubectl --context=${{ env.ADMIN_CTX }} get storageclass -o name \
             | tee /tmp/scs.txt
-          grep -v 'local-path-storage' /tmp/scs.txt \
-            | while read sc; do
-                echo " deleting $sc"
-                kubectl --context=${{ env.ADMIN_CTX }} delete "$sc" \
-                  --ignore-not-found --timeout=30s || echo "  ❌ failed"
-              done
+          grep -v 'local-path-storage' /tmp/scs.txt | while read sc; do
+            echo " deleting $sc"
+            kubectl --context=${{ env.ADMIN_CTX }} delete "$sc" \
+              --ignore-not-found --timeout=30s || echo "  ❌ failed"
+          done
 
       - name: Cleanup teardown-admin binding
         if: always()
