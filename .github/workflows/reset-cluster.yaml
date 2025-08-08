@@ -148,26 +148,38 @@ jobs:
         run: |
           set -euxo pipefail
           echo "🔎 all ClusterRoleBindings"
-          ALL=$(kubectl get clusterrolebinding -o name)
-          KEEP='^(cluster-admin|k3s|system:|teardown-admin)'
-          BAD=$(echo "$ALL" | grep -Ev "$KEEP" || true)
-          echo "$BAD" | sed 's/^/  delete /'
-          echo "$BAD" | xargs -I{} $DEL delete {} --ignore-not-found
+          # Get just the names
+          CRBS=$(kubectl get clusterrolebinding -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}')
+          # Define the ones we want to keep
+          KEEP_REGEX='^(cluster-admin|k3s|system:|teardown-admin)$'
+          echo "→ will keep (matching): $KEEP_REGEX"
+          echo "🔻 scanning for deletions"
+          for crb in $CRBS; do
+            if [[ $crb =~ $KEEP_REGEX ]]; then
+              echo "  🔒 keep: $crb"
+            else
+              echo "  🗑️  delete: $crb"
+              $DEL delete clusterrolebinding "$crb" --ignore-not-found
+            fi
+          done
 
       - name: Delete non-default RoleBindings
         if: ${{ inputs.full == 'FULL' }}
         run: |
           set -euxo pipefail
           echo "🔎 all RoleBindings"
-          kubectl get rolebinding -A -o=custom-columns=NS:.metadata.namespace,NAME:.metadata.name --no-headers \
-            | while read ns name; do
-                if [[ "$name" =~ ^(system:|k3s|default|kube|extension) ]]; then
-                  echo "  keeping $ns/$name"
-                else
-                  echo "  delete $ns/$name"
-                  $DEL delete rolebinding "$name" -n "$ns" --ignore-not-found
-                fi
-              done
+          # Fetch namespace + name, skip headers
+          kubectl get rolebinding -A \
+            -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name --no-headers \
+          | while read ns name; do
+              KEEP='^(system:|k3s|default|kube|extension)'
+              if [[ $name =~ $KEEP ]]; then
+                echo "  🔒 keep: $ns/$name"
+              else
+                echo "  🗑️  delete: $ns/$name"
+                $DEL delete rolebinding "$name" -n "$ns" --ignore-not-found
+              fi
+            done
 
       - name: Cleanup teardown-admin binding
         if: always()
