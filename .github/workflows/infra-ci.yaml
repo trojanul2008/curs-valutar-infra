@@ -67,18 +67,18 @@ jobs:
       - name: 🚨 Kyverno Policy Check
         run: |
           kustomize build infrastructure/k8s/overlays/${{ matrix.overlay }} > manifest.yaml
-          if kyverno apply infrastructure/kyverno --resource manifest.yaml --policy-report > kyverno-report.yaml; then
-            echo "📦 kyverno-report.yaml contents:"
-            cat kyverno-report.yaml
-            if grep -q 'kind:' kyverno-report.yaml; then
-              yq -o=json kyverno-report.yaml > kyverno-results.json
-              head -n 10 kyverno-report.yaml
-            else
-              echo "⚠️ kyverno-report.yaml looks malformed — missing expected keys"
-              exit 1
-            fi
+          # Run Kyverno and capture the full output
+          kyverno apply infrastructure/kyverno --resource manifest.yaml --policy-report > kyverno-full.log
+          # Extract only the YAML portion starting from 'apiVersion'
+          awk '/^apiVersion:/' ,0 kyverno-full.log > kyverno-report.yaml
+          echo "📦 Cleaned kyverno-report.yaml contents:"
+          cat kyverno-report.yaml
+          # Basic sanity check before parsing
+          if grep -q 'kind:' kyverno-report.yaml; then
+            yq -o=json kyverno-report.yaml > kyverno-results.json
+            head -n 10 kyverno-report.yaml
           else
-            echo "❌ Kyverno apply failed — skipping parsing"
+            echo "⚠️ kyverno-report.yaml looks malformed — missing expected keys"
             exit 1
           fi
 
