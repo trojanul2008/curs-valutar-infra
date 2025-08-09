@@ -1,8 +1,31 @@
 #!/usr/bin/env bash
-export PS4='[$BASH_SOURCE:$LINENO ${FUNCNAME[0]}()] '
-set -euxo pipefail
 
-# ✅ Enable Trivy internal debugging
+# ----- Ultra debug prompt, safe under `set -u` -----
+# Show file:line and function name (defaults to "main" at top-level)
+export PS4='[${BASH_SOURCE[0]:-?}:${LINENO} ${FUNCNAME[0]:-main}] '
+
+# Strict mode + xtrace after PS4 is set
+set -Eeuo pipefail
+set -x
+
+# Error trap for postmortem dump
+on_error() {
+  local ec=$?
+  echo ""
+  echo "💥 Error trapped in ${BASH_SOURCE[0]} at line ${BASH_LINENO[0]} (exit=$ec)"
+  echo "📂 scan-results/trivy-images (if any):"
+  ls -lah scan-results/trivy-images 2>/dev/null || true
+  echo "🧪 Dump first 120 lines of any error logs:"
+  for f in scan-results/trivy-images/error-*.log; do
+    [[ -f "$f" ]] || continue
+    echo "------ $f"
+    sed -n '1,120p' "$f" || true
+  done
+  exit "$ec"
+}
+trap on_error ERR
+
+# ----- Config -----
 export TRIVY_DEBUG=true
 
 OVERLAY="${1:-dev}"
@@ -10,19 +33,25 @@ OVERLAY_DIR="infrastructure/k8s/overlays/${OVERLAY}"
 TRIVY_BIN="$(command -v trivy || true)"
 TRIVY_CACHE_DIR="${TRIVY_CACHE_DIR:-/tmp/trivy-cache}"
 
-if [[ -z "$TRIVY_BIN" ]]; then
-  echo "❌ Trivy binary not found in PATH"
-  exit 1
-fi
+# Ensure dependencies exist
+command -v yq >/dev/null
+command -v jq >/dev/null
+command -v kustomize >/dev/null
 
+# Make sure cache dir exists and is writable
+mkdir -p "$TRIVY_CACHE_DIR"
+chmod 777 "$TRIVY_CACHE_DIR" || true
+
+# ----- Context echo -----
 echo "📦 Overlay context: $OVERLAY"
 echo "🔍 Trivy version: $($TRIVY_BIN --version | head -1)"
 echo "🔍 yq version: $(yq --version)"
-echo "📁 Cache dir: $TRIVY_CACHE_DIR"
+echo "🔍 jq version: $(jq --version)"
+echo "📁 Trivy cache dir: $TRIVY_CACHE_DIR"
 echo "📄 Overlay YAML files count: $(ls -1 "$OVERLAY_DIR"/*.yaml | wc -l)"
-echo "📂 Overlay YAML files list:"
 ls -1 "$OVERLAY_DIR"/*.yaml
 
+# Prepare output dirs
 mkdir -p scan-results/trivy-images
 mkdir -p scan-results/trivy-configs
 
@@ -40,39 +69,40 @@ vulnerable_images=0
 scan_failed=0
 approved_vulnerabilities=()
 
+# ----- Image extraction -----
 echo "🔍 Extracting container images from YAMLs..."
-images=$(yq eval '.. | select(has("image")) | .image | select(. != null)' "$OVERLAY_DIR"/*.yaml || true)
+images="$(yq eval '.. | select(has(\"image\")) | .image | select(. != null)' "$OVERLAY_DIR"/*.yaml || true)"
 
 echo "🧾 Parsed image list:"
-echo "$images"
+printf '%s\n' "$images"
 
 if [[ -z "$images" ]]; then
   echo "⚠️ No container images found — check overlay YAMLs or yq query syntax"
   exit 3
 fi
 
+# ----- Scan loop -----
 for image in $images; do
   ((total_images++))
   echo "🚀 Scanning image: $image"
 
-  safe_name=$(echo "$image" | tr '/:' '__')
+  safe_name="$(echo "$image" | tr '/:' '__')"
   scan_json="scan-results/trivy-images/image-${OVERLAY}-${safe_name}.json"
   error_log="scan-results/trivy-images/error-${safe_name}.log"
 
   echo "🔧 Trivy command:"
-  echo "$TRIVY_BIN image \"$image\" --severity HIGH,CRITICAL --no-progress --cache-dir \"$TRIVY_CACHE_DIR\" -f json -o \"$scan_json\""
+  echo "$TRIVY_BIN image \"$image\" --debug --severity HIGH,CRITICAL --no-progress --cache-dir \"$TRIVY_CACHE_DIR\" -f json -o \"$scan_json\""
 
   if ! "$TRIVY_BIN" image "$image" \
-    --debug \
-    --severity HIGH,CRITICAL \
-    --no-progress \
-    --cache-dir "$TRIVY_CACHE_DIR" \
-    -f json -o "$scan_json" 2> "$error_log"; then
-
+      --debug \
+      --severity HIGH,CRITICAL \
+      --no-progress \
+      --cache-dir "$TRIVY_CACHE_DIR" \
+      -f json -o "$scan_json" 2> "$error_log"; then
     echo "❌ Trivy scan failed for $image"
     echo "⚠️ Exit code: $?"
     echo "⚠️ stderr from Trivy:"
-    cat "$error_log"
+    sed -n '1,200p' "$error_log" || true
     echo "⚠️ scan_json presence:"
     ls -lah "$scan_json" || echo "🚫 JSON output not created"
     ((scan_failed++))
@@ -80,43 +110,46 @@ for image in $images; do
   fi
 
   ((scanned_images++))
-  echo "📄 Trivy scan output (short preview):"
-  head -20 "$scan_json"
+  echo "📄 Trivy scan output (preview):"
+  head -20 "$scan_json" || true
 
-  if jq -e '.Results[].Vulnerabilities != null' "$scan_json" >/dev/null; then
+  # Parse vulnerabilities
+  if jq -e '.Results[]? | select(.Vulnerabilities != null) | .Vulnerabilities | length > 0' "$scan_json" >/dev/null; then
     while IFS= read -r vuln; do
-      vuln_id=$(jq -r '.VulnerabilityID' <<< "$vuln")
-      if [[ " ${approved_vulnerabilities[@]} " =~ " ${vuln_id} " ]]; then
+      vuln_id="$(jq -r '.VulnerabilityID' <<< "$vuln")"
+      if [[ " ${approved_vulnerabilities[*]-} " == *" ${vuln_id} "* ]]; then
         echo "⚠️ Approved vulnerability: $vuln_id in $image"
       else
         echo "❌ Critical vulnerability: $vuln_id in $image"
-        echo "Image: $image" >> "$vuln_report"
-        jq -r <<< "$vuln" '. | "  - \(.VulnerabilityID): \(.Title) (Severity: \(.Severity), Fixed: \(.FixedVersion))"' >> "$vuln_report"
-        echo "" >> "$vuln_report"
+        {
+          echo "Image: $image"
+          jq -r <<< "$vuln" '. | "  - \(.VulnerabilityID): \(.Title) (Severity: \(.Severity), Fixed: \(.FixedVersion // "n/a"))"'
+          echo ""
+        } >> "$vuln_report"
         ((vulnerable_images++))
         ((scan_failed++))
       fi
-    done < <(jq -c '.Results[].Vulnerabilities[]' "$scan_json")
+    done < <(jq -c '.Results[]? | select(.Vulnerabilities != null) | .Vulnerabilities[]' "$scan_json")
   else
     echo "✅ No critical vulnerabilities found in $image"
   fi
 done
 
+# ----- Config scan -----
 echo "🛠 Building manifest via Kustomize..."
-if ! kustomize build "$OVERLAY_DIR" > "$manifest_file"; then
-  echo "❌ Failed to build manifest with kustomize"
-  exit 4
-fi
+kustomize build "$OVERLAY_DIR" > "$manifest_file"
 
 echo "🔎 Running Trivy config scan..."
-if ! "$TRIVY_BIN" config "$manifest_file" | tee "$config_report"; then
+# Add --debug to config as well for parity
+if ! "$TRIVY_BIN" config --debug "$manifest_file" | tee "$config_report"; then
   echo "❌ Trivy config scan failed"
   exit 5
 fi
 
-echo "📜 Trivy config scan output:"
-head -30 "$config_report"
+echo "📜 Trivy config scan (preview):"
+sed -n '1,60p' "$config_report" || true
 
+# ----- Summary -----
 {
   echo ""
   echo "=== Image Scan Summary (${OVERLAY}) ==="
@@ -125,14 +158,15 @@ head -30 "$config_report"
   echo "Vulnerable images: $vulnerable_images"
 } >> "$image_report"
 
-if (( scan_failed > 0 )); then
-  echo "❌ One or more scans failed or critical vulnerabilities found"
-  exit 1
-fi
-
+# Final checks
 if (( scanned_images == 0 )); then
   echo "⚠️ No images were scanned — check overlay or YAMLs"
   exit 2
+fi
+
+if (( scan_failed > 0 )); then
+  echo "❌ One or more scans failed or critical vulnerabilities found"
+  exit 1
 fi
 
 echo "✅ Scanning complete for overlay: $OVERLAY"
