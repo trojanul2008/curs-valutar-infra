@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 
 # ----- Ultra debug prompt, safe under `set -u` -----
+# Show file:line and function name (defaults to "main" at top-level)
 export PS4='[${BASH_SOURCE[0]:-?}:${LINENO} ${FUNCNAME[0]:-main}] '
+
+# Strict mode + xtrace after PS4 is set
 set -Eeuo pipefail
 set -x
 
@@ -30,10 +33,12 @@ OVERLAY_DIR="infrastructure/k8s/overlays/${OVERLAY}"
 TRIVY_BIN="$(command -v trivy || true)"
 TRIVY_CACHE_DIR="${TRIVY_CACHE_DIR:-/tmp/trivy-cache}"
 
+# Ensure dependencies exist
 command -v yq >/dev/null
 command -v jq >/dev/null
 command -v kustomize >/dev/null
 
+# Make sure cache dir exists and is writable
 mkdir -p "$TRIVY_CACHE_DIR"
 chmod 777 "$TRIVY_CACHE_DIR" || true
 
@@ -46,6 +51,7 @@ echo "📁 Trivy cache dir: $TRIVY_CACHE_DIR"
 echo "📄 Overlay YAML files count: $(ls -1 "$OVERLAY_DIR"/*.yaml | wc -l)"
 ls -1 "$OVERLAY_DIR"/*.yaml
 
+# Prepare output dirs
 mkdir -p scan-results/trivy-images
 mkdir -p scan-results/trivy-configs
 
@@ -63,15 +69,31 @@ vulnerable_images=0
 scan_failed=0
 approved_vulnerabilities=()
 
-# 🔍 Extract images safely
-echo "🔍 Extracting container images from YAMLs..."
-images="$(yq eval -o=tsv '.. | .image? // empty' "$OVERLAY_DIR"/*.yaml | sort -u || true)"
+# ----- Build manifest first (ensures images resolve from base + patches) -----
+echo "🛠 Building manifest via Kustomize..."
+if ! kustomize build "$OVERLAY_DIR" > "$manifest_file"; then
+  echo "❌ Kustomize build failed for overlay: $OVERLAY"
+  exit 4
+fi
+
+# ----- Image extraction from rendered manifest -----
+echo "🔍 Extracting container images from rendered manifest..."
+# Primary: traverse all docs and pick any .image scalar present
+images="$(yq eval -r '.. | .image? | select(.)' "$manifest_file" | sort -u || true)"
+
+# Fallback: explicitly target containers/initContainers if primary yields none
+if [[ -z "$images" ]]; then
+  echo "ℹ️ Primary traversal empty; trying explicit container paths..."
+  images="$(yq eval -r '.spec.template.spec.containers[].image? // "" | select(.)' "$manifest_file" 2>/dev/null || true)"
+  init_images="$(yq eval -r '.spec.template.spec.initContainers[].image? // "" | select(.)' "$manifest_file" 2>/dev/null || true)"
+  images="$(printf '%s\n%s\n' "$images" "$init_images" | sed '/^$/d' | sort -u || true)"
+fi
 
 echo "🧾 Parsed image list:"
 printf '%s\n' "$images"
 
 if [[ -z "$images" ]]; then
-  echo "⚠️ No container images found — check overlay YAMLs or yq query syntax"
+  echo "⚠️ No container images found — check overlay/base manifests or yq query syntax"
   exit 3
 fi
 
@@ -107,6 +129,7 @@ while IFS= read -r image; do
   echo "📄 Trivy scan output (preview):"
   head -20 "$scan_json" || true
 
+  # Parse vulnerabilities
   if jq -e '.Results[]? | select(.Vulnerabilities != null) | .Vulnerabilities | length > 0' "$scan_json" >/dev/null; then
     while IFS= read -r vuln; do
       vuln_id="$(jq -r '.VulnerabilityID' <<< "$vuln")"
@@ -128,10 +151,7 @@ while IFS= read -r image; do
   fi
 done <<< "$images"
 
-# ----- Config scan -----
-echo "🛠 Building manifest via Kustomize..."
-kustomize build "$OVERLAY_DIR" > "$manifest_file"
-
+# ----- Config scan (reuse the rendered manifest) -----
 echo "🔎 Running Trivy config scan..."
 if ! "$TRIVY_BIN" config --debug "$manifest_file" | tee "$config_report"; then
   echo "❌ Trivy config scan failed"
@@ -141,6 +161,7 @@ fi
 echo "📜 Trivy config scan (preview):"
 sed -n '1,60p' "$config_report" || true
 
+# ----- Summary -----
 {
   echo ""
   echo "=== Image Scan Summary (${OVERLAY}) ==="
@@ -149,6 +170,7 @@ sed -n '1,60p' "$config_report" || true
   echo "Vulnerable images: $vulnerable_images"
 } >> "$image_report"
 
+# Final checks
 if (( scanned_images == 0 )); then
   echo "⚠️ No images were scanned — check overlay or YAMLs"
   exit 2
