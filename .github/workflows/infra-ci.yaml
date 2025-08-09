@@ -28,6 +28,19 @@ jobs:
           }
           echo "versions=$(extract)" >> "$GITHUB_OUTPUT"
 
+  verify-cli-versions:
+    name: 🧪 Verify CLI Versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/install/install-all.sh
+      - run: |
+          echo "🧪 Installed CLI versions:"
+          kubectl version --client
+          kyverno version
+          flux --version
+          kustomize version
+
   ci:
     name: 🧪 Full Infra CI
     runs-on: ubuntu-latest
