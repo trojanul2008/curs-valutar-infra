@@ -94,12 +94,22 @@ jobs:
         run: |
           source scripts/utils/load-version.sh
           export TRIVY_CACHE_DIR=$(get_version TRIVY_CACHE_DIR)
+
           chmod +x scripts/utils/scan-images.sh
+          echo "🔎 Running scan-images.sh..."
           scripts/utils/scan-images.sh > trivy-report.txt
-          grep -E 'CRITICAL|HIGH' trivy-report.txt > trivy-summary.txt || echo "✅ No critical vulnerabilities"
+
+          echo "📄 Extracting vulnerabilities..."
+          grep -E 'CRITICAL|HIGH' trivy-report.txt > trivy-summary.txt || echo "✅ No critical vulnerabilities found"
+
           if grep -qE 'CRITICAL|HIGH' trivy-summary.txt; then
-            echo "❌ Vulnerabilities detected"
+            echo "❌ Vulnerabilities detected:"
+            echo "-----------------------------"
+            cat trivy-summary.txt
+            echo "-----------------------------"
             exit 1
+          else
+            echo "✅ Scan passed — no CRITICAL/HIGH vulnerabilities"
           fi
 
       - name: 📊 Drift Detection (Flux)
