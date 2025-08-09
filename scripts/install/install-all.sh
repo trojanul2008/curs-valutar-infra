@@ -9,5 +9,6 @@ scripts/install/install-yq.sh
 scripts/install/install-trivy.sh
 scripts/install/install-kubeconform.sh
 scripts/install/install-flux.sh
+scripts/install/install-kyverno-cli.sh
 echo "✅ All CLI tools installed successfully"
 
