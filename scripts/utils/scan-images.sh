@@ -102,6 +102,11 @@ while IFS= read -r image; do
   ((total_images++))
   echo "🚀 Scanning image: $image"
 
+  if [[ -z "$image" ]]; then
+    echo "⚠️ Empty image entry, skipping"
+    continue
+  fi
+
   safe_name="$(echo "$image" | tr '/:' '__')"
   scan_json="scan-results/trivy-images/image-${OVERLAY}-${safe_name}.json"
   error_log="scan-results/trivy-images/error-${safe_name}.log"
@@ -109,21 +114,22 @@ while IFS= read -r image; do
   echo "🔧 Trivy command:"
   echo "$TRIVY_BIN image \"$image\" --debug --severity HIGH,CRITICAL --no-progress --cache-dir \"$TRIVY_CACHE_DIR\" -f json -o \"$scan_json\""
 
-  if ! "$TRIVY_BIN" image "$image" \
+  {
+    "$TRIVY_BIN" image "$image" \
       --debug \
       --severity HIGH,CRITICAL \
       --no-progress \
       --cache-dir "$TRIVY_CACHE_DIR" \
-      -f json -o "$scan_json" 2> "$error_log"; then
+      -f json -o "$scan_json"
+  } 2>"$error_log" || {
     echo "❌ Trivy scan failed for $image"
-    echo "⚠️ Exit code: $?"
     echo "⚠️ stderr from Trivy:"
     sed -n '1,200p' "$error_log" || true
-    echo "⚠️ scan_json presence:"
-    ls -lah "$scan_json" || echo "🚫 JSON output not created"
+    echo "🚫 JSON output status:"
+    ls -lh "$scan_json" || echo "❌ JSON not generated"
     ((scan_failed++))
     continue
-  fi
+  }
 
   ((scanned_images++))
   echo "📄 Trivy scan output (preview):"
