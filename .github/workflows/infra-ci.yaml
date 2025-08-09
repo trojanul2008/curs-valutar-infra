@@ -122,7 +122,7 @@ jobs:
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > ~/.kube/config
-          flux --context="CTX_${{ matrix.overlay }}" diff kustomization curs-valutar-${{ matrix.overlay }} \
+          flux --context="remote-cloudflare" diff kustomization curs-valutar-${{ matrix.overlay }} \
             --path infrastructure/k8s/overlays/${{ matrix.overlay }} > drift.txt || echo "❌ Drift check failed"
 
       - name: 💬 PR Summary Comment
