@@ -54,6 +54,14 @@ jobs:
       - name: 🔧 Install Tools & CLI
         run: bash scripts/install/install-all.sh
 
+      - name: 🧪 Debug PATH
+        run: echo $PATH
+
+      - name: 🔍 Manually Check Trivy
+        run: |
+          ls -lah /usr/local/bin/trivy || echo "❌ Still missing"
+          /usr/local/bin/trivy --version
+
       - name: 🧹 Lint YAMLs
         run: |
           find infrastructure -name '*.yaml' -o -name '*.yml' \
@@ -86,10 +94,13 @@ jobs:
         run: |
           source scripts/utils/load-version.sh
           export TRIVY_CACHE_DIR=$(get_version TRIVY_CACHE_DIR)
-      
           chmod +x scripts/utils/scan-images.sh
           scripts/utils/scan-images.sh > trivy-report.txt
           grep -E 'CRITICAL|HIGH' trivy-report.txt > trivy-summary.txt || echo "✅ No critical vulnerabilities"
+          if grep -qE 'CRITICAL|HIGH' trivy-summary.txt; then
+            echo "❌ Vulnerabilities detected"
+            exit 1
+          fi
 
       - name: 📊 Drift Detection (Flux)
         run: |
@@ -128,3 +139,15 @@ jobs:
                 body
               });
             }
+
+      - name: 📎 Upload Scan & Policy Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: infra-scan-${{ matrix.overlay }}
+          path: |
+            trivy-report.txt
+            trivy-summary.txt
+            kyverno-full.log
+            kyverno-report.yaml
+            kyverno-results.json
+            drift.txt
