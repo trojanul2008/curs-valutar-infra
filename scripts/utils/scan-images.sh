@@ -93,9 +93,9 @@ if [[ -z "$images" ]]; then
   exit 3
 fi
 
-# Scan loop
+# ----- Scan loop -----
 while IFS= read -r image; do
-  ((total_images++))
+  (( total_images += 1 ))
   echo "🚀 Scanning image: $image"
 
   if [[ -z "$image" ]]; then
@@ -123,11 +123,11 @@ while IFS= read -r image; do
     sed -n '1,200p' "$error_log" || true
     echo "🚫 JSON output status:"
     ls -lh "$scan_json" || echo "❌ JSON not generated"
-    ((scan_failed++))
+    (( scan_failed += 1 ))
     continue
   }
 
-  ((scanned_images++))
+  (( scanned_images += 1 ))
   echo "📄 Trivy scan output (preview):"
   head -20 "$scan_json" || true
 
@@ -144,8 +144,8 @@ while IFS= read -r image; do
           jq -r <<< "$vuln" '. | "  - \(.VulnerabilityID): \(.Title) (Severity: \(.Severity), Fixed: \(.FixedVersion // "n/a"))"'
           echo ""
         } >> "$vuln_report"
-        ((vulnerable_images++))
-        ((scan_failed++))
+        (( vulnerable_images += 1 ))
+        (( scan_failed += 1 ))
       fi
     done < <(jq -c '.Results[]? | select(.Vulnerabilities != null) | .Vulnerabilities[]' "$scan_json")
   else
