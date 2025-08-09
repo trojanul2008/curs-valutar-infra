@@ -37,11 +37,20 @@ jobs:
           set -euo pipefail
           set -x
           bash scripts/install/install-all.sh
+
           echo "🧪 Installed CLI versions:"
           kubectl version --client
           kyverno version
           flux --version
           kustomize version
+
+          # # Optional version pin check
+          # required_kustomize="v5.0.1"
+          # installed_kustomize=$(kustomize version | grep -oE 'v[0-9\.]+')
+          # if [[ "$installed_kustomize" != "$required_kustomize" ]]; then
+          #   echo "❌ Kustomize version mismatch"
+          #   exit 1
+          # fi
 
   ci:
     name: 🧪 Full Infra CI
@@ -53,7 +62,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 🔧 Install Tools & CLI
+      - name: 🔧 Install Tools
         run: |
           set -euo pipefail
           set -x
@@ -66,6 +75,13 @@ jobs:
           find infrastructure -name '*.yaml' -o -name '*.yml' \
             | xargs yamllint -c .yamllint.yml
 
+          # Optional: Helm lint if Helm charts exist
+          if [ -d helm ]; then
+            for chart in helm/*; do
+              helm lint "$chart" || exit 1
+            done
+          fi
+
       - name: 📐 Validate K8s Manifests
         run: |
           set -euo pipefail
@@ -77,48 +93,67 @@ jobs:
         run: |
           set -euo pipefail
           set -x
-          kustomize build infrastructure/k8s/overlays/${{ matrix.overlay }} > manifest.yaml
-          kyverno apply infrastructure/kyverno --resource manifest.yaml --policy-report | tee kyverno-full.log
-          sed -n '/^apiVersion:/,$p' kyverno-full.log > kyverno-report.yaml
-          echo "📦 Cleaned kyverno-report.yaml contents:"
-          cat kyverno-report.yaml
+          kustomize build infrastructure/k8s/overlays/${{ matrix.overlay }} > manifest-${{ matrix.overlay }}.yaml
+          kyverno apply infrastructure/kyverno --resource manifest-${{ matrix.overlay }}.yaml --policy-report | tee kyverno-full-${{ matrix.overlay }}.log
+          sed -n '/^apiVersion:/,$p' kyverno-full-${{ matrix.overlay }}.log > kyverno-report-${{ matrix.overlay }}.yaml
 
-          if grep -q 'kind:' kyverno-report.yaml; then
-            yq -o=json kyverno-report.yaml > kyverno-results.json
+          echo "📦 Cleaned kyverno-report-${{ matrix.overlay }}.yaml contents:"
+          cat kyverno-report-${{ matrix.overlay }}.yaml
+
+          if grep -q 'kind:' kyverno-report-${{ matrix.overlay }}.yaml; then
+            yq -o=json kyverno-report-${{ matrix.overlay }}.yaml > kyverno-results-${{ matrix.overlay }}.json
           else
             echo "❌ kyverno-report.yaml malformed or empty"
             exit 1
           fi
 
-      - name: 🛡️ Image Vulnerability Scan (Trivy)
+      - name: 🔍 Image & Config Security Scans (Trivy)
         run: |
           set -euo pipefail
           set -x
           source scripts/utils/load-version.sh
           export TRIVY_CACHE_DIR=$(get_version TRIVY_CACHE_DIR)
           chmod +x scripts/utils/scan-images.sh
-          echo "🔎 Running scan-images.sh..."
+          echo "🔎 Running scan-images.sh with config scan..."
+
           if ! bash -x scripts/utils/scan-images.sh "${{ matrix.overlay }}" 2>&1 | tee trivy-full-${{ matrix.overlay }}.log.txt; then
-            echo "❌ Trivy scan failed — displaying full output below"
-            echo "------------------------------------------------"
+            echo "❌ Trivy scan failed"
             cat trivy-full-${{ matrix.overlay }}.log.txt
-            echo "------------------------------------------------"
             exit 1
           fi
-          echo "✅ Trivy scan passed"
 
-      - name: 📝 Trivy Scan Summary
+          echo "✅ Trivy image & config scans passed"
+
+          # Optional: Snyk scan (requires API token)
+          snyk test --file=manifest-${{ matrix.overlay }}.yaml || true
+
+          # Optional: Checkov config scan
+          checkov -f manifest-${{ matrix.overlay }}.yaml -o json > checkov-${{ matrix.overlay }}.json
+
+      - name: 📝 Extended Scan Summary
         if: always()
         run: |
+          echo "## Infra Scan Summary (${{ matrix.overlay }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
           if [[ -f scan-results/image-scan-report-${{ matrix.overlay }}.txt ]]; then
-            echo "## Trivy Vulnerability Summary (${{ matrix.overlay }})" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            head -n 200 scan-results/image-scan-report-${{ matrix.overlay }}.txt >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "⚠️  No scan report found for ${{ matrix.overlay }}" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Trivy Image Scan" >> "$GITHUB_STEP_SUMMARY"
+            head -n 100 scan-results/image-scan-report-${{ matrix.overlay }}.txt >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: 📊 Drift Detection (Flux & kubectl)
+          if [[ -f scan-results/trivy-config-${{ matrix.overlay }}.txt ]]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Trivy Config Scan" >> "$GITHUB_STEP_SUMMARY"
+            head -n 100 scan-results/trivy-config-${{ matrix.overlay }}.txt >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [[ -f kyverno-report-${{ matrix.overlay }}.yaml ]]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Kyverno Policy Report" >> "$GITHUB_STEP_SUMMARY"
+            yq eval '.results[] | "- \(.message) [\(.policy)] for \(.resources[0].name)"' kyverno-report-${{ matrix.overlay }}.yaml >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: 📊 Drift Detection (Parallel)
         run: |
           set -euo pipefail
           set -x
@@ -127,16 +162,18 @@ jobs:
 
           flux --context="remote-cloudflare" diff kustomization curs-valutar-${{ matrix.overlay }} \
             --path infrastructure/k8s/overlays/${{ matrix.overlay }} \
-            | tee drift-flux-${{ matrix.overlay }}.txt
+            > drift-flux-${{ matrix.overlay }}.txt &
 
           kubectl --context=remote-cloudflare diff -k infrastructure/k8s/overlays/${{ matrix.overlay }} \
-            | tee drift-kubectl-${{ matrix.overlay }}.txt
+            > drift-kubectl-${{ matrix.overlay }}.txt &
+
+          wait
 
           if grep -qE '^[-+]' drift-kubectl-${{ matrix.overlay }}.txt; then
             echo "❌ kubectl diff shows resource drift"
             exit 1
           else
-            echo "✅ No resource drift detected by kubectl diff"
+            echo "✅ No resource drift detected"
           fi
 
       - name: 📎 Upload All Artifacts
@@ -144,15 +181,19 @@ jobs:
         with:
           name: infra-report-${{ matrix.overlay }}
           path: |
-            kyverno-full.log
-            kyverno-report.yaml
-            kyverno-results.json
+            kyverno-full-${{ matrix.overlay }}.log
+            kyverno-report-${{ matrix.overlay }}.yaml
+            kyverno-results-${{ matrix.overlay }}.json
+            manifest-${{ matrix.overlay }}.yaml
             trivy-full-${{ matrix.overlay }}.log.txt
             scan-results/image-scan-report-${{ matrix.overlay }}.txt
             scan-results/vulnerability-details-${{ matrix.overlay }}.txt
             trivy-scan-*.json
+            scan-results/trivy-config-${{ matrix.overlay }}.txt
             drift-flux-${{ matrix.overlay }}.txt
             drift-kubectl-${{ matrix.overlay }}.txt
+            # Optional
+            checkov-${{ matrix.overlay }}.json
 
       - name: 💬 PR Summary Comment
         if: github.event_name == 'pull_request'
@@ -162,26 +203,11 @@ jobs:
             const fs = require('fs');
             let overlay = '${{ matrix.overlay }}';
             let body = `## ✅ Infra CI Summary: \`${overlay}\`\n`;
-            const trivy = fs.readFileSync(`scan-results/vulnerability-details-${overlay}.txt`, 'utf8');
-            body += `\n### Trivy Vulnerabilities:\n\`\`\`\n${trivy.slice(0,800) || '(none)'}\n\`\`\``;
-            const kyvernoJson = JSON.parse(fs.readFileSync('kyverno-results.json','utf8'));
-            const violations = kyvernoJson.results?.filter(r => r.result === 'fail') || [];
-            if (violations.length > 0) {
-              body += `\n### Kyverno Violations:\n`;
-              violations.forEach(v => {
-                body += `- 🔴 ${v.resources?.[0]?.kind} "${v.resources?.[0]?.name}": ${v.message}\n`;
-              });
-            } else {
-              body += `\n✅ No Kyverno policy violations\n`;
-            }
-            const drift = fs.readFileSync(`drift-kubectl-${overlay}.txt`, 'utf8');
-            body += `\n### Kubectl Drift:\n\`\`\`\n${drift.slice(0,400)}\n\`\`\``;
-            const pr = context.payload.pull_request?.number;
-            if (pr) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: pr,
-                body
-              });
-            }
+
+            let trivy = '';
+            let configScan = '';
+            try {
+              trivy = fs.readFileSync(`scan-results/vulnerability-details-${overlay}.txt`, 'utf8');
+            } catch {}
+            try {
+              configScan = fs.readFileSync
