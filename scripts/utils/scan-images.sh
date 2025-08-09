@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
+: "${TRIVY_CACHE_DIR:=/tmp/trivy-cache}"
+
 # Enhanced debug info
 echo "### SCAN DEBUG INFO ###"
 echo "Trivy version: $(trivy --version | head -1)"

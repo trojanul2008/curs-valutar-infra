@@ -84,6 +84,8 @@ jobs:
 
       - name: 🛡️ Image Vulnerability Scan (Trivy)
         run: |
+          source scripts/utils/load-version.sh
+          export TRIVY_CACHE_DIR=$(get_version TRIVY_CACHE_DIR)
           chmod +x scripts/utils/scan-images.sh
           scripts/utils/scan-images.sh > trivy-report.txt
           grep -E 'CRITICAL|HIGH' trivy-report.txt > trivy-summary.txt || echo "✅ No critical vulnerabilities"
