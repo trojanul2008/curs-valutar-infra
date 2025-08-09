@@ -177,10 +177,19 @@ if (( scanned_images == 0 )); then
   exit 2
 fi
 
+##exit if vulnerabilites are found
+#if (( scan_failed > 0 )); then
+#  echo "❌ One or more scans failed or critical vulnerabilities found"
+#  exit 1
+#fi
+
+#allow to continue if vulnerabilites are found, but log and flag them
 if (( scan_failed > 0 )); then
-  echo "❌ One or more scans failed or critical vulnerabilities found"
-  exit 1
+  echo '❌ One or more scans failed or critical vulnerabilities found'
+  echo '⚠️ Continuing for artifact upload and PR summary'
+  touch scan-failed-${OVERLAY}
 fi
+
 
 echo "✅ Scanning complete for overlay: $OVERLAY"
 
