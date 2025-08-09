@@ -47,6 +47,7 @@ for image in $images; do
 
   safe_name=$(echo "$image" | tr '/:' '__')
   scan_json="scan-results/trivy-images/image-${OVERLAY}-${safe_name}.json"
+  error_log="scan-results/trivy-images/error-${safe_name}.log"
 
   # Extra debug before calling Trivy
   echo "🔧 Command: $TRIVY_BIN image --severity HIGH,CRITICAL --no-progress --cache-dir $TRIVY_CACHE_DIR -f json -o $scan_json $image"
@@ -56,11 +57,11 @@ for image in $images; do
       --severity HIGH,CRITICAL \
       --no-progress \
       --cache-dir "$TRIVY_CACHE_DIR" \
-      -f json -o "$scan_json" 2> "scan-results/trivy-images/error-${safe_name}.log"; then
+      -f json -o "$scan_json" 2> "$error_log"; then
 
     echo "❌ Trivy scan failed for $image"
-    echo "⚠️ Error log:"
-    cat "scan-results/trivy-images/error-${safe_name}.log"
+    echo "⚠️ Trivy stderr:"
+    cat "$error_log"
     ((scan_failed++))
     continue
   fi
