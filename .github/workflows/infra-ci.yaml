@@ -70,7 +70,7 @@ jobs:
           # Run Kyverno and capture the full output
           kyverno apply infrastructure/kyverno --resource manifest.yaml --policy-report > kyverno-full.log
           # Extract only the YAML portion starting from 'apiVersion'
-          awk '/^apiVersion:/' ,0 kyverno-full.log > kyverno-report.yaml
+          sed -n '/^apiVersion:/,$p' kyverno-full.log > kyverno-report.yaml
           echo "📦 Cleaned kyverno-report.yaml contents:"
           cat kyverno-report.yaml
           # Basic sanity check before parsing
