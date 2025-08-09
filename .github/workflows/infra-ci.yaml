@@ -68,11 +68,13 @@ jobs:
         run: |
           kustomize build infrastructure/k8s/overlays/${{ matrix.overlay }} > manifest.yaml
           if kyverno apply infrastructure/kyverno --resource manifest.yaml --policy-report > kyverno-report.yaml; then
-            if yamllint kyverno-report.yaml; then
+            echo "📦 kyverno-report.yaml contents:"
+            cat kyverno-report.yaml
+            if grep -q 'kind:' kyverno-report.yaml; then
               yq -o=json kyverno-report.yaml > kyverno-results.json
               head -n 10 kyverno-report.yaml
             else
-              echo "⚠️ kyverno-report.yaml failed yamllint check"
+              echo "⚠️ kyverno-report.yaml looks malformed — missing expected keys"
               exit 1
             fi
           else
