@@ -32,9 +32,13 @@ total_images=0
 scanned_images=0
 vulnerable_images=0
 
+# Create result directory
+mkdir -p scan-results
+
 # File names include overlay for clarity
-report_file="image-scan-report-${OVERLAY}.txt"
-vuln_details="vulnerability-details-${OVERLAY}.txt"
+report_file="scan-results/image-scan-report-${OVERLAY}.txt"
+vuln_details="scan-results/vulnerability-details-${OVERLAY}.txt"
+
 echo "Image Scan Report (${OVERLAY}) - $(date)" > "$report_file"
 echo "Vulnerable Images:" > "$vuln_details"
 
@@ -123,6 +127,11 @@ cat "$vuln_details"
 if (( scan_failed )); then
   echo "❌ Critical vulnerabilities found in overlay $OVERLAY"
   exit 1
+fi
+
+if (( scanned_images == 0 )); then
+  echo "❌ No images were scanned — possible misconfiguration"
+  exit 2
 fi
 
 echo "✅ Image vulnerability scan completed for overlay $OVERLAY"

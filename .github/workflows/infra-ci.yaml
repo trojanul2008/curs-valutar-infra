@@ -99,7 +99,7 @@ jobs:
           chmod +x scripts/utils/scan-images.sh
           echo "🔎 Running scan-images.sh..."
           # 👇 Stream output and detect failure
-          if ! bash -x scripts/utils/scan-images.sh "${{ matrix.overlay }}" 2>&1 | tee trivy-full.log.txt; then
+          if ! bash -x scripts/utils/scan-images.sh "${{ matrix.overlay }}" 2>&1 | tee trivy-full-${{ matrix.overlay }}.log.txt
             echo "❌ Trivy scan failed — displaying full output below"
             echo "------------------------------------------------"
             cat trivy-full.log.txt
@@ -111,9 +111,13 @@ jobs:
       - name: 📝 Trivy Scan Summary
         if: always()
         run: |
-          echo "## Trivy Vulnerability Summary (${{ matrix.overlay }})" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          head -n 200 image-scan-report.txt >> "$GITHUB_STEP_SUMMARY"
+          if [[ -f scan-results/image-scan-report-${{ matrix.overlay }}.txt ]]; then
+            echo "## Trivy Vulnerability Summary (${{ matrix.overlay }})" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            head -n 200 scan-results/image-scan-report-${{ matrix.overlay }}.txt >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "⚠️  No scan report found for ${{ matrix.overlay }}" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: 📊 Drift Detection (Flux & kubectl)
         run: |
@@ -144,9 +148,9 @@ jobs:
             kyverno-full.log
             kyverno-report.yaml
             kyverno-results.json
-            trivy-full.log.txt
-            image-scan-report.txt
-            vulnerability-details.txt
+            trivy-full-${{ matrix.overlay }}.log.txt
+            scan-results/image-scan-report-${{ matrix.overlay }}.txt
+            scan-results/vulnerability-details-${{ matrix.overlay }}.txt
             trivy-scan-*.json
             drift-flux-${{ matrix.overlay }}.txt
             drift-kubectl-${{ matrix.overlay }}.txt
@@ -159,10 +163,8 @@ jobs:
             const fs = require('fs');
             let overlay = '${{ matrix.overlay }}';
             let body = `## ✅ Infra CI Summary: \`${overlay}\`\n`;
-
-            const trivy = fs.readFileSync(`vulnerability-details.txt`, 'utf8');
+            const trivy = fs.readFileSync(`scan-results/vulnerability-details-${overlay}.txt`, 'utf8');
             body += `\n### Trivy Vulnerabilities:\n\`\`\`\n${trivy.slice(0,800) || '(none)'}\n\`\`\``;
-
             const kyvernoJson = JSON.parse(fs.readFileSync('kyverno-results.json','utf8'));
             const violations = kyvernoJson.results?.filter(r => r.result === 'fail') || [];
             if (violations.length > 0) {
@@ -173,10 +175,8 @@ jobs:
             } else {
               body += `\n✅ No Kyverno policy violations\n`;
             }
-
             const drift = fs.readFileSync(`drift-kubectl-${overlay}.txt`, 'utf8');
             body += `\n### Kubectl Drift:\n\`\`\`\n${drift.slice(0,400)}\n\`\`\``;
-
             const pr = context.payload.pull_request?.number;
             if (pr) {
               await github.rest.issues.createComment({
