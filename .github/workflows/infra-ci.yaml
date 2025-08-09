@@ -66,9 +66,19 @@ jobs:
 
       - name: 🚨 Kyverno Policy Check
         run: |
-          kustomize build infrastructure/k8s/overlays/${{ matrix.overlay }} > manifest.yaml
-          kyverno apply infrastructure/kyverno --resource manifest.yaml --policy-report > kyverno-report.yaml
-          yq -o=json kyverno-report.yaml > kyverno-results.json
+        kustomize build infrastructure/k8s/overlays/${{ matrix.overlay }} > manifest.yaml
+        if kyverno apply infrastructure/kyverno --resource manifest.yaml --policy-report > kyverno-report.yaml; then
+          if yamllint kyverno-report.yaml; then
+            yq -o=json kyverno-report.yaml > kyverno-results.json
+            head -n 10 kyverno-report.yaml
+          else
+            echo "⚠️ kyverno-report.yaml failed yamllint check"
+            exit 1
+          fi
+        else
+          echo "❌ Kyverno apply failed — skipping parsing"
+          exit 1
+        fi
 
       - name: 🛡️ Image Vulnerability Scan (Trivy)
         run: |
