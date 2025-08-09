@@ -10,6 +10,7 @@ yq: 4.43.1
 trivy: 0.50.1
 traefikApp: 3.5.0
 traefikChart: 37.0.0
+externalSecretsChart: 0.9.8
 TRIVY_CACHE_DIR: /tmp/trivy-cache
 HELM_PLUGIN_DIR: ~/.local/share/helm/plugins
 KUBECTL_CONTEXT: remote-cloudflare
