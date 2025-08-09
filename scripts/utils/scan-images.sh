@@ -44,14 +44,21 @@ images=$(yq eval '.. | select(has("image")) | .image | select(. != null)' "$OVER
 for image in $images; do
   ((total_images++))
   echo "🚀 Scanning image: $image"
-  ((scanned_images++))
+
   safe_name=$(echo "$image" | tr '/:' '__')
   scan_json="scan-results/trivy-images/image-${OVERLAY}-${safe_name}.json"
 
-  "$TRIVY_BIN" image "$image" \
-    --severity HIGH,CRITICAL \
-    --cache-dir "$TRIVY_CACHE_DIR" \
-    -f json -o "$scan_json" || true
+  if ! "$TRIVY_BIN" image "$image" \
+      --severity HIGH,CRITICAL \
+      --no-progress \
+      --cache-dir "$TRIVY_CACHE_DIR" \
+      -f json -o "$scan_json"; then
+    echo "❌ Trivy scan failed for $image" >> "$image_report"
+    ((scan_failed++))
+    continue
+  fi
+
+  ((scanned_images++))
 
   if jq -e '.Results[].Vulnerabilities != null' "$scan_json" >/dev/null; then
     while IFS= read -r vuln; do
@@ -64,7 +71,7 @@ for image in $images; do
         jq -r <<< "$vuln" '. | "  - \(.VulnerabilityID): \(.Title) (Severity: \(.Severity), Fixed: \(.FixedVersion))"' >> "$vuln_report"
         echo "" >> "$vuln_report"
         ((vulnerable_images++))
-        scan_failed=1
+        ((scan_failed++))
       fi
     done < <(jq -c '.Results[].Vulnerabilities[]' "$scan_json")
   else
@@ -79,13 +86,16 @@ echo "🔎 Running config scan with Trivy..."
 "$TRIVY_BIN" config "$manifest_file" | tee "$config_report"
 
 # Summary
-echo -e "\n=== Image Scan Summary (${OVERLAY}) ===" >> "$image_report"
-echo "Images found: $total_images" >> "$image_report"
-echo "Images scanned: $scanned_images" >> "$image_report"
-echo "Vulnerable images: $vulnerable_images" >> "$image_report"
+{
+  echo ""
+  echo "=== Image Scan Summary (${OVERLAY}) ==="
+  echo "Images found: $total_images"
+  echo "Images scanned: $scanned_images"
+  echo "Vulnerable images: $vulnerable_images"
+} >> "$image_report"
 
-if (( scan_failed )); then
-  echo "❌ Critical vulnerabilities found in image scan ($OVERLAY)"
+if (( scan_failed > 0 )); then
+  echo "❌ One or more scans failed or critical vulnerabilities found"
   exit 1
 fi
 
