@@ -31,13 +31,13 @@ jobs:
   verify-cli-versions:
     name: 🧪 Verify CLI Versions
     runs-on: ubuntu-latest
+    needs: setup
     steps:
       - uses: actions/checkout@v4
       - run: |
           set -euo pipefail
           set -x
           bash scripts/install/install-all.sh
-
           echo "🧪 Installed CLI versions:"
           kubectl version --client
           kyverno version
@@ -55,7 +55,7 @@ jobs:
   ci:
     name: 🧪 Full Infra CI
     runs-on: ubuntu-latest
-    needs: setup
+    needs: [setup, verify-cli-versions]
     strategy:
       matrix:
         overlay: [dev, prod]
@@ -96,12 +96,13 @@ jobs:
           kustomize build infrastructure/k8s/overlays/${{ matrix.overlay }} > manifest-${{ matrix.overlay }}.yaml
           kyverno apply infrastructure/kyverno --resource manifest-${{ matrix.overlay }}.yaml --policy-report | tee kyverno-full-${{ matrix.overlay }}.log
           sed -n '/^apiVersion:/,$p' kyverno-full-${{ matrix.overlay }}.log > kyverno-report-${{ matrix.overlay }}.yaml
-
           echo "📦 Cleaned kyverno-report-${{ matrix.overlay }}.yaml contents:"
           cat kyverno-report-${{ matrix.overlay }}.yaml
-
           if grep -q 'kind:' kyverno-report-${{ matrix.overlay }}.yaml; then
-            yq -o=json kyverno-report-${{ matrix.overlay }}.yaml > kyverno-results-${{ matrix.overlay }}.json
+            if ! yq -o=json kyverno-report-${{ matrix.overlay }}.yaml > kyverno-results-${{ matrix.overlay }}.json; then
+              echo "⚠️ yq failed, writing empty JSON"
+              echo '{}' > kyverno-results-${{ matrix.overlay }}.json
+            fi
           else
             echo "❌ kyverno-report.yaml malformed or empty"
             exit 1
@@ -210,4 +211,15 @@ jobs:
               trivy = fs.readFileSync(`scan-results/vulnerability-details-${overlay}.txt`, 'utf8');
             } catch {}
             try {
-              configScan = fs.readFileSync
+              configScan = fs.readFileSync(`scan-results/trivy-config-${overlay}.txt`, 'utf8');
+            } catch {}
+
+            body += `### Trivy Scan Results\n\`\`\`\n${trivy.slice(0, 500)}\n\`\`\`\n`;
+            body += `### Config Scan Results\n\`\`\`\n${configScan.slice(0, 500)}\n\`\`\`\n`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            })
