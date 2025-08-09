@@ -22,19 +22,21 @@ jobs:
       - id: extract
         shell: bash
         run: |
+          set -euo pipefail
+          set -x
           file=".github/versions.yaml"
-          extract() {
-            yq -o=json '.' "$file" | jq -c .
-          }
-          echo "versions=$(extract)" >> "$GITHUB_OUTPUT"
+          yq -o=json '.' "$file" | jq -c . > versions.json
+          echo "versions=$(cat versions.json)" >> "$GITHUB_OUTPUT"
 
   verify-cli-versions:
     name: 🧪 Verify CLI Versions
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: bash scripts/install/install-all.sh
       - run: |
+          set -euo pipefail
+          set -x
+          bash scripts/install/install-all.sh
           echo "🧪 Installed CLI versions:"
           kubectl version --client
           kyverno version
@@ -52,78 +54,97 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: 🔧 Install Tools & CLI
-        run: bash scripts/install/install-all.sh
-
-      - name: 🧪 Debug PATH
-        run: echo $PATH
-
-      - name: 🔍 Manually Check Trivy
         run: |
-          ls -lah /usr/local/bin/trivy || echo "❌ Still missing"
-          /usr/local/bin/trivy --version
+          set -euo pipefail
+          set -x
+          bash scripts/install/install-all.sh
 
       - name: 🧹 Lint YAMLs
         run: |
+          set -euo pipefail
+          set -x
           find infrastructure -name '*.yaml' -o -name '*.yml' \
             | xargs yamllint -c .yamllint.yml
 
       - name: 📐 Validate K8s Manifests
         run: |
+          set -euo pipefail
+          set -x
           kustomize build infrastructure/k8s/base | kubeconform -summary
           kustomize build infrastructure/k8s/overlays/${{ matrix.overlay }} | kubeconform -summary
 
       - name: 🚨 Kyverno Policy Check
         run: |
+          set -euo pipefail
+          set -x
           kustomize build infrastructure/k8s/overlays/${{ matrix.overlay }} > manifest.yaml
-          # Run Kyverno and capture the full output
-          kyverno apply infrastructure/kyverno --resource manifest.yaml --policy-report > kyverno-full.log
-          # Extract only the YAML portion starting from 'apiVersion'
+          kyverno apply infrastructure/kyverno --resource manifest.yaml --policy-report | tee kyverno-full.log
           sed -n '/^apiVersion:/,$p' kyverno-full.log > kyverno-report.yaml
           echo "📦 Cleaned kyverno-report.yaml contents:"
           cat kyverno-report.yaml
-          # Basic sanity check before parsing
+
           if grep -q 'kind:' kyverno-report.yaml; then
             yq -o=json kyverno-report.yaml > kyverno-results.json
-            head -n 10 kyverno-report.yaml
           else
-            echo "⚠️ kyverno-report.yaml looks malformed — missing expected keys"
+            echo "❌ kyverno-report.yaml malformed or empty"
             exit 1
           fi
 
       - name: 🛡️ Image Vulnerability Scan (Trivy)
         run: |
+          set -euo pipefail
+          set -x
           source scripts/utils/load-version.sh
           export TRIVY_CACHE_DIR=$(get_version TRIVY_CACHE_DIR)
 
           chmod +x scripts/utils/scan-images.sh
           echo "🔎 Running scan-images.sh..."
-          # scripts/utils/scan-images.sh > trivy-report.txt
           scripts/utils/scan-images.sh | tee trivy-report.txt
 
-          echo "📄 Full Trivy Report:"
-          echo "-----------------------------"
-          cat trivy-report.txt || echo "⚠️ Report file missing or unreadable"
-          echo "-----------------------------"
-
           echo "📄 Extracting CRITICAL/HIGH vulnerabilities..."
-          grep -E 'CRITICAL|HIGH' trivy-report.txt > trivy-summary.txt || echo "✅ No critical vulnerabilities found"
-
-          echo "📌 Summary of vulnerabilities:"
-          cat trivy-summary.txt || echo "(none)"
+          grep -E 'CRITICAL|HIGH' trivy-report.txt > trivy-summary.txt || echo "(none)"
 
           if grep -qE 'CRITICAL|HIGH' trivy-summary.txt; then
             echo "❌ Vulnerabilities detected"
+            cat trivy-summary.txt
             exit 1
           else
             echo "✅ Scan passed — no CRITICAL/HIGH vulnerabilities"
           fi
 
-      - name: 📊 Drift Detection (Flux)
+      - name: 📊 Drift Detection (Flux & kubectl)
         run: |
+          set -euo pipefail
+          set -x
           mkdir -p ~/.kube
           echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > ~/.kube/config
+
           flux --context="remote-cloudflare" diff kustomization curs-valutar-${{ matrix.overlay }} \
-            --path infrastructure/k8s/overlays/${{ matrix.overlay }} > drift.txt || echo "❌ Drift check failed"
+            --path infrastructure/k8s/overlays/${{ matrix.overlay }} \
+            | tee drift-flux-${{ matrix.overlay }}.txt
+
+          kubectl --context=remote-cloudflare diff -k infrastructure/k8s/overlays/${{ matrix.overlay }} \
+            | tee drift-kubectl-${{ matrix.overlay }}.txt
+
+          if grep -qE '^[-+]' drift-kubectl-${{ matrix.overlay }}.txt; then
+            echo "❌ kubectl diff shows resource drift"
+            exit 1
+          else
+            echo "✅ No resource drift detected by kubectl diff"
+          fi
+
+      - name: 📎 Upload All Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: infra-report-${{ matrix.overlay }}
+          path: |
+            kyverno-full.log
+            kyverno-report.yaml
+            kyverno-results.json
+            trivy-report.txt
+            trivy-summary.txt
+            drift-flux-${{ matrix.overlay }}.txt
+            drift-kubectl-${{ matrix.overlay }}.txt
 
       - name: 💬 PR Summary Comment
         if: github.event_name == 'pull_request'
@@ -131,20 +152,25 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            let body = `### ✅ Infra CI Report: \`${{ matrix.overlay }}\`\n\n`;
+            let overlay = '${{ matrix.overlay }}';
+            let body = `## ✅ Infra CI Summary: \`${overlay}\`\n`;
 
-            const kyverno = JSON.parse(fs.readFileSync('kyverno-results.json','utf8'));
-            const violations = kyverno.results?.filter(r => r.result === 'fail') || [];
-            body += `**Kyverno Violations:** ${violations.length}\n`;
-            violations.forEach(v => {
-              body += `- 🔴 ${v.resources?.[0]?.kind} "${v.resources?.[0]?.name}" — ${v.message}\n`;
-            });
+            const trivy = fs.readFileSync(`trivy-summary.txt`, 'utf8');
+            body += `\n### Trivy Vulnerabilities:\n\`\`\`\n${trivy || '(none)'}\n\`\`\``;
 
-            const trivy = fs.readFileSync('trivy-summary.txt','utf8');
-            body += `\n**Trivy Summary:**\n${trivy}\n`;
+            const kyvernoJson = JSON.parse(fs.readFileSync('kyverno-results.json','utf8'));
+            const violations = kyvernoJson.results?.filter(r => r.result === 'fail') || [];
+            if (violations.length > 0) {
+              body += `\n### Kyverno Violations:\n`;
+              violations.forEach(v => {
+                body += `- 🔴 ${v.resources?.[0]?.kind} "${v.resources?.[0]?.name}": ${v.message}\n`;
+              });
+            } else {
+              body += `\n✅ No Kyverno policy violations\n`;
+            }
 
-            const drift = fs.readFileSync('drift.txt','utf8');
-            body += `\n**Drift Detection:**\n\`\`\`\n${drift.slice(0,500)}\n\`\`\``;
+            const drift = fs.readFileSync(`drift-kubectl-${overlay}.txt`, 'utf8');
+            body += `\n### Kubectl Drift:\n\`\`\`\n${drift.slice(0,400)}\n\`\`\``;
 
             const pr = context.payload.pull_request?.number;
             if (pr) {
@@ -155,15 +181,3 @@ jobs:
                 body
               });
             }
-
-      - name: 📎 Upload Scan & Policy Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: infra-scan-${{ matrix.overlay }}
-          path: |
-            trivy-report.txt
-            trivy-summary.txt
-            kyverno-full.log
-            kyverno-report.yaml
-            kyverno-results.json
-            drift.txt
