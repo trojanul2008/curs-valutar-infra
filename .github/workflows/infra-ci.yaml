@@ -128,11 +128,11 @@ jobs:
           export TRIVY_CACHE_DIR=$(get_version TRIVY_CACHE_DIR)
           chmod +x scripts/utils/scan-images.sh
           echo "🔎 Running scan-images.sh with config scan..."
-
           if ! bash -x scripts/utils/scan-images.sh "${{ matrix.overlay }}" 2>&1 | tee trivy-full-${{ matrix.overlay }}.log.txt; then
             echo "❌ Trivy scan failed"
             cat trivy-full-${{ matrix.overlay }}.log.txt
-            exit 1
+            echo "⚠️ Continuing to upload artifacts for postmortem"
+            touch scan-failed-${{ matrix.overlay }}
           fi
 
           echo "✅ Trivy image & config scans passed"
@@ -164,6 +164,16 @@ jobs:
             echo "" >> "$GITHUB_STEP_SUMMARY"
             echo "### Kyverno Policy Report" >> "$GITHUB_STEP_SUMMARY"
             yq eval '.results[] | "- \(.message) [\(.policy)] for \(.resources[0].name)"' kyverno-report-${{ matrix.overlay }}.yaml >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if ls scan-results/trivy-images/image-${{ matrix.overlay }}*.json 1> /dev/null 2>&1; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Trivy Critical Vulnerabilities (Table View)" >> "$GITHUB_STEP_SUMMARY"
+            echo "| CVE ID | Title | Severity | Fixed Version |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|--------|-------|----------|----------------|" >> "$GITHUB_STEP_SUMMARY"
+            jq -r '.Results[]? | select(.Vulnerabilities) | .Vulnerabilities[] |
+                  "| \(.VulnerabilityID) | \(.Title | gsub("[|]"; " ")) | \(.Severity) | \(.FixedVersion // "n/a") |"' \
+                  scan-results/trivy-images/image-${{ matrix.overlay }}*.json >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: 📊 Drift Detection (Parallel)
