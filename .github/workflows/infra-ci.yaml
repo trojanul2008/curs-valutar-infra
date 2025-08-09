@@ -97,7 +97,8 @@ jobs:
 
           chmod +x scripts/utils/scan-images.sh
           echo "🔎 Running scan-images.sh..."
-          scripts/utils/scan-images.sh > trivy-report.txt
+          # scripts/utils/scan-images.sh > trivy-report.txt
+          scripts/utils/scan-images.sh | tee trivy-report.txt
 
           echo "📄 Full Trivy Report:"
           echo "-----------------------------"
