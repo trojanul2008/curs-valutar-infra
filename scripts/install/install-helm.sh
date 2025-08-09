@@ -1,20 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -e
+source ./scripts/utils/load-version.sh
 
-ARCH=$(uname -m)
-if [ "$ARCH" = "x86_64" ]; then
-  PLATFORM="amd64"
-elif [ "$ARCH" = "aarch64" ]; then
-  PLATFORM="arm64"
-else
-  echo "❌ Unsupported architecture: $ARCH"
-  exit 1
-fi
+VERSION=$(get_version helm)     # e.g., 3.18.4
+export DESIRED_VERSION="v${VERSION}"
 
-VERSION="${HELM_VERSION:-v3.14.0}"
-TARBALL="helm-${VERSION}-linux-${PLATFORM}.tar.gz"
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+echo "✅ Helm $(helm version --short) installed"
 
-# Download and extract
-curl -sL "https://get.helm.sh/${TARBALL}" | tar xz
-chmod +x linux-${PLATFORM}/helm
-sudo mv linux-${PLATFORM}/helm /usr/local/bin/

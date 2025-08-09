@@ -1,0 +1,31 @@
+name: "Validate Environment Inputs"
+description: "Ensures environment is dev, prod or both. Confirms production with YES."
+
+inputs:
+  environment:
+    required: true
+    description: "Environment target (dev/prod/both)"
+  confirm:
+    required: false
+    description: "Must be YES for prod/both"
+
+outputs:
+  target:
+    description: "Resolved target"
+    value: ${{ steps.validate.outputs.target }}
+
+runs:
+  using: "composite"
+  steps:
+    - id: validate
+      shell: bash
+      run: |
+        TARGET="${{ inputs.environment }}"
+        CONFIRM="${{ inputs.confirm }}"
+        echo "📍 Environment: ${TARGET}"
+        case "$TARGET" in dev|prod|both) ;; *) echo "❌ Invalid environment"; exit 1 ;; esac
+        if [[ "$TARGET" != "dev" && "$CONFIRM" != "YES" ]]; then
+          echo "❌ Confirmation required for prod/both"
+          exit 1
+        fi
+        echo "target=$TARGET" >> "$GITHUB_OUTPUT"

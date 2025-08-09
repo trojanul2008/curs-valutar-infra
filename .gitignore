@@ -1,0 +1,21 @@
+# CI artifacts
+kyverno-results.json
+kyverno-raw.txt
+kyverno-policyreport.yaml
+kyverno-violations.json
+drift-*.txt
+trivy-*.json
+trivy-report.txt
+trivy-summary.txt
+vulnerability-details.txt
+artifacts/
+.bootstrap-summary
+
+# Kustomize cache
+.cache/
+.kustomize/
+
+# OS/editor
+.DS_Store
+*.swp
+

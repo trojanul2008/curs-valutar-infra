@@ -1,18 +1,23 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -e
+source ./scripts/utils/load-version.sh
 
+VERSION=$(get_version kubeconform) # e.g., 0.6.4
+OS=linux
 ARCH=$(uname -m)
-if [ "$ARCH" = "x86_64" ]; then
-  PLATFORM="linux-amd64"
-elif [ "$ARCH" = "aarch64" ]; then
-  PLATFORM="linux-arm64"
-else
-  echo "❌ Unsupported architecture: $ARCH"
-  exit 1
-fi
+case "$ARCH" in
+  x86_64) ARCH="amd64" ;;
+  aarch64|arm64) ARCH="arm64" ;;
+  *) echo "❌ Unsupported arch: $ARCH"; exit 1 ;;
+esac
 
-VERSION="${KUBECONFORM_VERSION:-v0.6.7}"
+TARBALL="kubeconform-${OS}-${ARCH}.tar.gz"
+URL="https://github.com/yannh/kubeconform/releases/download/v${VERSION}/${TARBALL}"
 
-curl -sL "https://github.com/yannh/kubeconform/releases/download/${VERSION}/kubeconform-${PLATFORM}.tar.gz" | tar xz
+curl -fsSLO "$URL"
+tar -xzf "$TARBALL" kubeconform
 chmod +x kubeconform
-sudo mv kubeconform /usr/local/bin/
+sudo mv kubeconform /usr/local/bin/kubeconform
+rm -f "$TARBALL"
+echo "✅ Kubeconform $(kubeconform -v) installed"
+

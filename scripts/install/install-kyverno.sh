@@ -1,19 +1,21 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -e
+source ./scripts/utils/load-version.sh
 
-ARCH=$(uname -m)
-if [ "$ARCH" = "x86_64" ]; then
-  PLATFORM="linux_x86_64"
-elif [ "$ARCH" = "aarch64" ]; then
-  PLATFORM="linux_arm64"
-else
-  echo "❌ Unsupported architecture: $ARCH"
-  exit 1
-fi
+CHART_VERSION=$(get_version kyvernoChart)  # e.g., 3.2.7
+APP_VERSION=$(get_version kyvernoApp)      # optional
+NAMESPACE="kyverno"
 
-VERSION="${KYVERNO_VERSION:-v1.12.4}"
-TARBALL="kyverno-cli_${VERSION}_${PLATFORM}.tar.gz"
+helm repo add kyverno https://kyverno.github.io/kyverno/
+helm repo update
 
-curl -sL "https://github.com/kyverno/kyverno/releases/download/${VERSION}/${TARBALL}" | tar xz
-chmod +x kyverno
-sudo mv kyverno /usr/local/bin/
+helm upgrade --install kyverno kyverno/kyverno \
+  --namespace "$NAMESPACE" \
+  --create-namespace \
+  --version "$CHART_VERSION" \
+  --set installCRDs=true \
+  ${APP_VERSION:+--set image.tag="$APP_VERSION"} \
+  --wait --timeout 10m
+
+echo "✅ Kyverno chart ${CHART_VERSION} installed in namespace ${NAMESPACE}"
+

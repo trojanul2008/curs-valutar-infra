@@ -1,0 +1,19 @@
+name: "📦 Version Drift Detector"
+
+on:
+  pull_request:
+    branches: [dev, prod]
+    paths:
+      - ".github/versions.yaml"
+
+jobs:
+  detect-version-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🔍 Compare version diff
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          git diff origin/${{ github.base_ref }}...HEAD -- .github/versions.yaml || echo "✅ No drift detected"

@@ -1,0 +1,9 @@
+environments:
+  dev:
+    branch: dev
+    kube_context: remote-cloudflare
+    overlay_path: infrastructure/k8s/overlays/dev
+  prod:
+    branch: prod
+    kube_context: remote-cloudflare
+    overlay_path: infrastructure/k8s/overlays/prod

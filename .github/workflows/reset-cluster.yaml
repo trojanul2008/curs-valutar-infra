@@ -1,4 +1,4 @@
-name: "⚠️  Reset Cluster "
+name: "⚠️  Reset Cluster"
 
 on:
   workflow_dispatch:
@@ -12,248 +12,344 @@ on:
         required: false
         default: ""
       full:
-        description: "Type FULL to also wipe cluster-scoped resources (CRDs, webhook configs, PVs, etc.)"
+        description: "Type FULL to also wipe cluster-scoped resources (CRDs, webhooks, PVs, etc.)"
         required: false
         default: ""
       dry_run:
-        description: "true = just print what would be deleted; false = actually delete"
+        description: "true = only print actions; false = perform deletions"
         required: true
         default: "true"
+
+# Avoid concurrent resets; this protects your cluster from overlapping destructive runs
+concurrency:
+  group: reset-cluster
+  cancel-in-progress: false
+
+# Principle of least privilege for the workflow token
+permissions:
+  contents: read
 
 jobs:
   reset:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
-      ADMIN_CTX: remote-cloudflare
-
+      # Optional override via secret; else read from .github/versions.yaml
+      KUBECTL_CONTEXT: ${{ secrets.KUBECTL_CONTEXT_OVERRIDE || '' }}
+      # Optional Slack webhook for ops notifications (Incoming Webhook)
+      # SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL || '' }}
     steps:
-      - name: Echo reset starting
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🔍 Validate required secrets
+        shell: bash
         run: |
-          echo "⚠️ Starting full reset of Kubernetes cluster..."
+          set -euo pipefail
+          if [[ -z "${{ secrets.KUBE_CONFIG_DATA }}" ]]; then
+            echo "❌ Missing required secret: KUBE_CONFIG_DATA"
+            exit 1
+          fi
 
-      - name: Checkout repo
-        uses: actions/checkout@v3
-
-      - name: Install kubectl
-        uses: azure/setup-kubectl@v3
-        with:
-          version: latest
-
-      - name: Validate inputs
+      - name: 🧠 Load versions and context from .github/versions.yaml
+        id: versions
+        shell: bash
         run: |
+          set -euo pipefail
+          file=".github/versions.yaml"
+          readv() { sed -n "s/^$1:[[:space:]]*//p" "$file" | tr -d '"' | tr -d $'\r'; }
+          echo "kubectl=$(readv kubectl)" >> "$GITHUB_OUTPUT"
+          echo "flux=$(readv flux)" >> "$GITHUB_OUTPUT"
+          echo "yq=$(readv yq)" >> "$GITHUB_OUTPUT"
+          echo "kustomize=$(readv kustomize)" >> "$GITHUB_OUTPUT"
+          echo "kubeconform=$(readv kubeconform)" >> "$GITHUB_OUTPUT"
+          echo "trivy=$(readv trivy)" >> "$GITHUB_OUTPUT"
+          echo "context=$(readv KUBECTL_CONTEXT)" >> "$GITHUB_OUTPUT"
+
+      - name: 🔧 Install CLI tools (version-pinned)
+        shell: bash
+        env:
+          KUSTOMIZE_VERSION: ${{ steps.versions.outputs.kustomize }}
+          KUBECONFORM_VERSION: ${{ steps.versions.outputs.kubeconform }}
+          YQ_VERSION: ${{ steps.versions.outputs.yq }}
+          TRIVY_VERSION: ${{ steps.versions.outputs.trivy }}
+          KUBECTL_VERSION: ${{ steps.versions.outputs.kubectl }}
+          FLUX_VERSION: ${{ steps.versions.outputs.flux }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/install/install-all.sh
+          scripts/install/install-all.sh
+          kubectl version --client
+          flux --version || true
+          yq --version
+
+      - name: 🗂️ Init audit log directory
+        id: logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOG_DIR="$RUNNER_TEMP/reset-logs"
+          mkdir -p "$LOG_DIR"
+          echo "dir=$LOG_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: 🔐 Restore kubeconfig and validate context
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOG="${{ steps.logs.outputs.dir }}/01_restore_kubeconfig.log"
+          exec > >(tee -a "$LOG") 2>&1
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 --decode > ~/.kube/config
+
+          CTX="${{ env.KUBECTL_CONTEXT }}"
+          if [ -z "$CTX" ]; then
+            CTX="${{ steps.versions.outputs.context }}"
+          fi
+          if [ -z "$CTX" ]; then
+            echo "❌ No kube context provided (neither secret override nor versions.yaml)"
+            exit 1
+          fi
+
+          echo "🔎 Validating context exists in kubeconfig: $CTX"
+          if ! kubectl config get-contexts "$CTX" >/dev/null 2>&1; then
+            echo "❌ Context $CTX not found in kubeconfig"
+            echo "Available contexts:"
+            kubectl config get-contexts || true
+            exit 1
+          fi
+
+          kubectl config use-context "$CTX"
+          echo "🔑 Current context: $(kubectl config current-context)"
+
+          echo "🔗 Cluster connectivity check"
+          kubectl cluster-info || true
+          echo "👷 Nodes:"
+          kubectl get nodes -o wide || true
+          echo "🔐 RBAC preflight:"
+          kubectl auth can-i list namespaces || true
+          kubectl auth can-i delete namespaces || true
+
+      - name: ✅ Validate inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOG="${{ steps.logs.outputs.dir }}/02_validate_inputs.log"
+          exec > >(tee -a "$LOG") 2>&1
           NS="${{ inputs.namespace }}"
           CONF="${{ inputs.confirm }}"
           FULL="${{ inputs.full }}"
-          if [[ "$NS" =~ ^(prod|both)$ && "$CONF" != "YES" ]]; then
-            echo "❌ Type YES to wipe prod or both."; exit 1
+          DRY="${{ inputs.dry_run }}"
+          case "$NS" in dev|prod|both) ;; *) echo "❌ namespace must be dev|prod|both"; exit 1 ;; esac
+          if [[ "$NS" != "dev" && "$CONF" != "YES" ]]; then
+            echo "❌ Confirmation required (type YES) for prod or both"; exit 1
           fi
           if [[ "$FULL" == "FULL" && "$CONF" != "YES" ]]; then
-            echo "❌ Type YES for a FULL wipe."; exit 1
+            echo "❌ Confirmation required (type YES) for FULL wipe"; exit 1
           fi
-          echo "✅ Inputs ok: namespace=$NS, full=$FULL, dry-run=${{ inputs.dry_run }}"
+          if [[ "$DRY" != "true" && "$DRY" != "false" ]]; then
+            echo "❌ dry_run must be true or false"; exit 1
+          fi
+          echo "✅ Inputs OK: namespace=$NS full=$FULL dry_run=$DRY"
 
-      - name: Expose dry-run flag
+      - name: 📣 Echo dry-run mode
+        run: 'echo 🟡 Dry-run mode enabled: no actual deletions performed'
+        if: ${{ inputs.dry_run == 'true' }}
+
+      - name: 📦 Ensure jq is available
+        shell: bash
         run: |
-          echo "DRY_RUN=${{ inputs.dry_run }}" >> $GITHUB_ENV
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y jq
+          fi
 
-      - name: Decode kubeconfigs
-        run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBE_CONFIG_CLOUDFLARE }}" | base64 --decode > ~/.kube/remote-config
-          echo "${{ secrets.K3S_ADMIN_KUBECONFIG }}"   | base64 --decode > ~/.kube/admin-config
-
-      - name: Expose merged KUBECONFIG for all steps
-        run: |
-          echo "KUBECONFIG=$HOME/.kube/remote-config:$HOME/.kube/admin-config" >> $GITHUB_ENV
-
-      - name: Debug show contexts
-        run: |
-          echo "--- available contexts ---"
-          kubectl config get-contexts -o name
-
-      - name: Patch remote cluster entry & skip TLS verify
-        run: |
-          kubectl --context=remote-cloudflare config set-cluster remote \
-            --server=https://api.istartit.com:443 \
-            --insecure-skip-tls-verify=true
-
-      - name: Grant teardown-admin to cloudflare-user
-        run: |
-          kubectl --context="${{ env.ADMIN_CTX }}" create clusterrolebinding teardown-admin \
-            --clusterrole=cluster-admin \
-            --serviceaccount=default:cloudflare-user \
-            --dry-run=client -o yaml \
-          | kubectl --context="${{ env.ADMIN_CTX }}" apply -f -
-
-      - name: Wipe namespaces
+      - name: 🛡️ Ensure cloudflare-user serviceaccount exists
+        shell: bash
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          RBAC_NS: default
         run: |
           set -euo pipefail
-          set -x
-          NS="${{ inputs.namespace }}"
-          FULL="${{ inputs.full }}"
-          TARGETS=("$NS")
-          [[ "$NS" == "both" ]]     && TARGETS=(dev prod)
-          [[ "$FULL" == "FULL" ]]   && TARGETS+=(flux-system kyverno traefik)
+          LOG="${{ steps.logs.outputs.dir }}/03_rbac_sa.log"
+          exec > >(tee -a "$LOG") 2>&1
+          NS="${RBAC_NS:-default}"
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "DRY-RUN: would create serviceaccount cloudflare-user in $NS if missing"
+          else
+            kubectl -n "$NS" get sa cloudflare-user >/dev/null 2>&1 || kubectl -n "$NS" create sa cloudflare-user
+          fi
 
-          echo "Deleting namespaces: ${TARGETS[*]}"
-          for N in "${TARGETS[@]}"; do
-            echo "=== processing namespace: $N ==="
-            kubectl --context="${{ env.ADMIN_CTX }}" delete ns "$N" \
-              --ignore-not-found --grace-period=0 --force --wait=false
-
-            for i in {1..30}; do
-              echo " waiting for $N to disappear (attempt $i)"
-              sleep 2
-              ! kubectl --context="${{ env.ADMIN_CTX }}" get ns "$N" &>/dev/null && break
-            done
-
-            echo "Attempting finalizers cleanup for $N"
-            RAW=$(kubectl --context="${{ env.ADMIN_CTX }}" get ns "$N" -o json 2>/dev/null || echo "")
-            if [[ -n "$RAW" ]]; then
-              echo "$RAW" | jq .
-              echo "$RAW" \
-                | jq 'del(.spec.finalizers)' \
-                | kubectl --context="${{ env.ADMIN_CTX }}" \
-                    replace --raw "/api/v1/namespaces/$N/finalize" -f -
-            else
-              echo " no raw JSON found for $N, skipping finalize"
-            fi
-          done
-
-      - name: Clean residual namespaced resources
+      - name: 🛡️ Grant teardown-admin to cloudflare-user
+        shell: bash
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          RBAC_NS: default
         run: |
           set -euo pipefail
-          set -x
-          NS="${{ inputs.namespace }}"
-          FULL="${{ inputs.full }}"
-          LIST=("$NS")
-          [[ "$NS" == "both" ]]     && LIST=(dev prod)
-          [[ "$FULL" == "FULL" ]]   && LIST+=(flux-system kyverno)
+          LOG="${{ steps.logs.outputs.dir }}/04_rbac_binding.log"
+          exec > >(tee -a "$LOG") 2>&1
+          NS="${RBAC_NS:-default}"
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "DRY-RUN: would grant clusterrolebinding teardown-admin to $NS/cloudflare-user"
+          else
+            kubectl create clusterrolebinding teardown-admin \
+              --clusterrole=cluster-admin \
+              --serviceaccount="$NS:cloudflare-user" \
+              --dry-run=client -o yaml | kubectl apply -f -
+            # annotate with timestamp for traceability
+            kubectl annotate clusterrolebinding teardown-admin reset.k8s.io/createdAt="$(date -u +%FT%TZ)" --overwrite
+          fi
 
-          timeout 3m bash -c "
-            for N in \"\${LIST[@]}\"; do
-              echo \"=== cleaning namespaced resources in: \$N ===\"
-              for kind in \$(kubectl --context=${{ env.ADMIN_CTX }} \
-                api-resources --namespaced=true --verbs=list -o name); do
-
-                echo \"  → checking \$kind in \$N\"
-                RES=\$(kubectl --context=${{ env.ADMIN_CTX }} get \$kind -n \$N -o name 2>/dev/null || echo "")
-                if [[ -n \"\$RES\" ]]; then
-                  echo \"    found: \$RES\"
-                  for r in \$RES; do
-                    echo \"      force-deleting \$r\"
-                    kubectl --context=${{ env.ADMIN_CTX }} delete \$r \
-                      --force --grace-period=0 --ignore-not-found || true
-                  done
-                fi
-              done
-            done
-          "
-
-      - name: Strip stuck CRD finalizers
-        if: ${{ inputs.full == 'FULL' }}
-        run: |
-          for crd in $(kubectl --context=${{ env.ADMIN_CTX }} get crd -o name); do
-            kubectl --context=${{ env.ADMIN_CTX }} patch "$crd" \
-              --type=merge -p '{"metadata":{"finalizers":[]}}' || true
-          done
-
-      - name: Wipe cluster-scoped resources
-        if: ${{ inputs.full == 'FULL' }}
+      - name: 🌐 Show API resources (debug)
+        shell: bash
         run: |
           set -euo pipefail
-          set -x
-
-          # CRDs
-          echo "=== Deleting CRDs except k3s-managed ==="
-          ALL_CRDS=$(kubectl --context=${{ env.ADMIN_CTX }} get crd -o name)
-          TO_DELETE_CRDS=$(echo "$ALL_CRDS" | grep -v 'k3s.cattle.io' || true)
-          for crd in $TO_DELETE_CRDS; do
-            echo " deleting CRD: $crd"
-            [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" delete "$crd" --ignore-not-found --timeout=60s
-          done
-
-          # Webhooks
-          echo "=== Deleting webhook configurations ==="
-          for w in mutatingwebhookconfiguration validatingwebhookconfiguration; do
-            echo " deleting all $w"
-            [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" delete "$w" --all --ignore-not-found --timeout=30s
-          done
-
-          # APIService
-          echo "=== Deleting selected APIService definitions ==="
-          APISVCS=$(kubectl --context=${{ env.ADMIN_CTX }} get apiservice -o name \
-                    | grep -E '(helm|traffic|kyverno)' || true)
-          for svc in $APISVCS; do
-            echo " deleting APIService: $svc"
-            [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" delete "$svc" --ignore-not-found --timeout=30s
-          done
-
-          # PersistentVolumes
-          echo "=== Deleting all PersistentVolumes ==="
-          [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" delete pv --all --ignore-not-found --timeout=30s
-
-          # StorageClasses
-          echo "=== Deleting storageclasses except local-path-storage ==="
-          ALL_SCS=$(kubectl --context=${{ env.ADMIN_CTX }} get storageclass -o name)
-          TO_DELETE_SCS=$(echo "$ALL_SCS" | grep -v 'local-path-storage' || true)
-          for sc in $TO_DELETE_SCS; do
-            echo " deleting SC: $sc"
-            [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" delete "$sc" --ignore-not-found --timeout=30s
-          done
-
-          # ClusterRoleBindings
-          echo "=== Deleting non-standard ClusterRoleBindings ==="
-          KEEP_RE='^(cluster-admin|k3s:.*|system:.*|cloudflare-user-.*|clustercidrs-node|local-path-provisioner-bind|metrics-server:system:auth-delegator|remote-admin-binding)$'
-          for crb in $(kubectl --context=${{ env.ADMIN_CTX }} get clusterrolebinding -o name); do
-            name=$(basename "$crb")
-            if [[ $name =~ $KEEP_RE ]]; then
-              echo " keeping CRB: $crb"
-            else
-              echo " deleting CRB: $crb"
-              [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" delete "$crb" --ignore-not-found --timeout=20s
-            fi
-          done
-
-          # RoleBindings
-          echo "=== Deleting non-standard RoleBindings ==="
-          KEEP_RE='^(default/github-runner-edit|remote-admin-binding|kube-system/metrics-server-auth-reader|kube-system/system:.*|kube-system/k3s:.*|kube-system/extension:.*)$'
-          kubectl --context=${{ env.ADMIN_CTX }} get rolebinding -A \
-            -o custom-columns="NS:.metadata.namespace,NAME:.metadata.name" --no-headers \
-          | while read -r ns name; do
-              full="$ns/$name"
-              if [[ $full =~ $KEEP_RE ]]; then
-                echo " keeping RB:  $full"
-              else
-                echo " deleting RB:  $full"
-                [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" -n "$ns" delete rolebinding "$name" --ignore-not-found --timeout=20s
-              fi
-            done
-
-          # **NEW**: Roles
-          echo "=== Deleting non-standard Roles ==="
-          KEEP_ROLES_RE='^(kube-public/system:controller:bootstrap-signer|kube-system/(extension-apiserver-authentication-reader|system:.*|system::.*))$'
-          kubectl --context=${{ env.ADMIN_CTX }} get role -A \
-            -o custom-columns="NS:.metadata.namespace,NAME:.metadata.name" --no-headers \
-          | while read -r ns name; do
-              full="$ns/$name"
-              if [[ $full =~ $KEEP_ROLES_RE ]]; then
-                echo " keeping Role: $full"
-              else
-                echo " deleting Role: $full"
-                [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" -n "$ns" delete role "$name" --ignore-not-found --timeout=20s
-              fi
-            done
-
-      - name: Cleanup teardown-admin binding
-        if: always()
-        run: |
-          [[ "$DRY_RUN" == "true" ]] || kubectl --context="${{ env.ADMIN_CTX }}" delete clusterrolebinding teardown-admin --ignore-not-found
-
-      - name: Sanity check post-reset
-        run: |
-          echo "🧪 Sanity checks post-reset:"
+          LOG="${{ steps.logs.outputs.dir }}/05_api_debug.log"
+          exec > >(tee -a "$LOG") 2>&1
+          kubectl api-resources | head -n 30 || true
           kubectl get ns || true
+
+      - name: 💤 Suspend Flux reconciliation (pre-wipe)
+        shell: bash
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          LOG="${{ steps.logs.outputs.dir }}/06_flux_suspend.log"
+          exec > >(tee -a "$LOG") 2>&1
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "DRY-RUN: would suspend Flux Kustomizations/HelmReleases in flux-system, dev, prod"
+          else
+            for ns in flux-system dev prod; do
+              if kubectl get ns "$ns" >/dev/null 2>&1; then
+                flux suspend kustomization --all -n "$ns" || true
+                flux suspend helmrelease --all -n "$ns" || true
+              fi
+            done
+          fi
+
+      - name: 🧹 Wipe namespaces and clean finalizers
+        shell: bash
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          LOG="${{ steps.logs.outputs.dir }}/07_wipe_namespaces.log"
+          exec > >(tee -a "$LOG") 2>&1
+          chmod +x scripts/reset/wipe-namespaces.sh scripts/reset/finalizer-cleanup.sh
+          scripts/reset/wipe-namespaces.sh "${{ inputs.namespace }}" "${{ inputs.full }}" "$DRY_RUN"
+
+      - name: 🧨 Strip CRD finalizers (when FULL)
+        if: ${{ inputs.full == 'FULL' }}
+        shell: bash
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          LOG="${{ steps.logs.outputs.dir }}/08_crd_finalizers.log"
+          exec > >(tee -a "$LOG") 2>&1
+          for crd in $(kubectl get crd -o name); do
+            if [[ "$DRY_RUN" == "true" ]]; then
+              echo "DRY-RUN: would patch finalizers for $crd"
+            else
+              kubectl patch "$crd" --type=merge -p '{"metadata":{"finalizers":[]}}' || true
+            fi
+          done
+
+      - name: 🧱 Cluster-scoped cleanup (when FULL)
+        if: ${{ inputs.full == 'FULL' }}
+        shell: bash
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          LOG="${{ steps.logs.outputs.dir }}/09_cluster_scoped_cleanup.log"
+          exec > >(tee -a "$LOG") 2>&1
+          chmod +x scripts/reset/cluster-scoped-cleanup.sh
+          scripts/reset/cluster-scoped-cleanup.sh "$DRY_RUN"
+
+      - name: 🧽 Remove temporary clusterrolebinding
+        if: always()
+        shell: bash
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          LOG="${{ steps.logs.outputs.dir }}/10_rbac_cleanup.log"
+          exec > >(tee -a "$LOG") 2>&1
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "DRY-RUN: would delete clusterrolebinding teardown-admin"
+          else
+            kubectl delete clusterrolebinding teardown-admin --ignore-not-found
+          fi
+
+      - name: ▶️ Resume Flux reconciliation (post-wipe)
+        if: ${{ inputs.dry_run == 'false' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOG="${{ steps.logs.outputs.dir }}/11_flux_resume.log"
+          exec > >(tee -a "$LOG") 2>&1
+          # Resume only if flux-system still exists
+          if kubectl get ns flux-system >/dev/null 2>&1; then
+            for ns in flux-system dev prod; do
+              if kubectl get ns "$ns" >/dev/null 2>&1; then
+                flux resume kustomization --all -n "$ns" || true
+                flux resume helmrelease --all -n "$ns" || true
+              fi
+            done
+          else
+            echo "Flux namespace not found; skipping resume."
+          fi
+
+      - name: 🧪 Sanity check post-reset
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOG="${{ steps.logs.outputs.dir }}/12_sanity_check.log"
+          exec > >(tee -a "$LOG") 2>&1
+          echo "🧪 Namespaces:"
+          kubectl get ns || true
+          echo "🧪 CRDs:"
           kubectl get crd || true
-          kubectl get pods -A || true
-          echo "✅ Cluster wipe complete."
+          echo "🧪 Pods (non-Running):"
+          kubectl get pods -A --field-selector=status.phase!=Running -o wide || true
+          echo "✅ Cluster wipe completed."
+
+      - name: 🧾 Package deletion logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reset-logs
+          path: ${{ steps.logs.outputs.dir }}
+          if-no-files-found: warn
+          retention-days: 14
+# - name: 🔔 Notify Slack (success)
+#   if: ${{ inputs.dry_run == 'false' && env.SLACK_WEBHOOK_URL != '' && success() }}
+#   shell: bash
+#   env:
+#     NS: ${{ inputs.namespace }}
+#     FULL: ${{ inputs.full }}
+#   run: |
+#     set -euo pipefail
+#     MSG="✅ Cluster reset completed
+#     • Namespace: ${NS}
+#     • Full wipe: ${FULL}
+#     • Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+#     payload=$(jq -n --arg text "$MSG" '{text: $text}')
+#     curl -s -X POST -H 'Content-type: application/json' --data "$payload" "${SLACK_WEBHOOK_URL}"
+
+# - name: 🔔 Notify Slack (failure)
+#   if: ${{ inputs.dry_run == 'false' && env.SLACK_WEBHOOK_URL != '' && failure() }}
+#   shell: bash
+#   env:
+#     NS: ${{ inputs.namespace }}
+#     FULL: ${{ inputs.full }}
+#   run: |
+#     set -euo pipefail
+#     MSG="❌ Cluster reset failed
+#     • Namespace: ${NS}
+#     • Full wipe: ${FULL}
+#     • Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+#     payload=$(jq -n --arg text "$MSG" '{text: $text}')
+#     curl -s -X POST -H 'Content-type: application/json' --data "$payload" "${SLACK_WEBHOOK_URL}"

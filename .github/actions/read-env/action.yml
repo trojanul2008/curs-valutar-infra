@@ -1,0 +1,24 @@
+name: "Read Environment Info"
+description: "Outputs context, branch, overlay path"
+inputs:
+  env:
+    required: true
+    description: "Target environment (dev/prod)"
+outputs:
+  branch:
+    description: "Git branch for env"
+  context:
+    description: "Kube context"
+  path:
+    description: "Overlay path"
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      run: |
+        file=".github/envs.yaml"
+        TARGET="${{ inputs.env }}"
+        read_env() { yq ".environments.${TARGET}.${1}" "$file" | tr -d '"' | tr -d $'\r'; }
+        echo "branch=$(read_env branch)" >> "$GITHUB_OUTPUT"
+        echo "context=$(read_env kube_context)" >> "$GITHUB_OUTPUT"
+        echo "path=$(read_env overlay_path)" >> "$GITHUB_OUTPUT"

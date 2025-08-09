@@ -1,19 +1,13 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -e
 
-echo "🔧 Installing Kubeconform..."
-scripts/install/install-kubeconform.sh
-
-echo "🛡️ Installing Kyverno..."
-scripts/install/install-kyverno.sh
-
-echo "⛵ Installing Helm..."
+echo "🧩 Installing CLI tools from versions.yaml..."
 scripts/install/install-helm.sh
-
-echo "📎 Installing YQ..."
+scripts/install/install-kubectl.sh
+scripts/install/install-kustomize.sh
 scripts/install/install-yq.sh
-
-echo "🔍 Installing Trivy..."
 scripts/install/install-trivy.sh
+scripts/install/install-kubeconform.sh
+scripts/install/install-flux.sh
+echo "✅ All CLI tools installed successfully"
 
-echo "✅ All tools installed successfully!"

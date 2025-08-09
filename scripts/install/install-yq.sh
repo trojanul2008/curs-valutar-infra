@@ -1,26 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -e
+source ./scripts/utils/load-version.sh
 
-VERSION="${YQ_VERSION:-v4.43.1}"
-OS=$(uname | tr '[:upper:]' '[:lower:]')
-ARCH=$(uname -m)
-
-case "$ARCH" in
-  x86_64) ARCH="amd64" ;;
-  aarch64 | arm64) ARCH="arm64" ;;
-  armv7l) ARCH="arm" ;;
-  i386 | i686) ARCH="386" ;;
-  *) echo "❌ Unsupported architecture: $ARCH"; exit 1 ;;
-esac
-
-BINARY="yq_${OS}_${ARCH}"
-URL="https://github.com/mikefarah/yq/releases/download/${VERSION}/${BINARY}"
-
-echo "📥 Downloading yq for $OS/$ARCH..."
-curl -sLo yq "$URL"
+VERSION=$(get_version yq)   # e.g., 4.43.1
+curl -fsSLo yq "https://github.com/mikefarah/yq/releases/download/v${VERSION}/yq_linux_amd64"
 chmod +x yq
-sudo mv yq /usr/local/bin/
+sudo mv yq /usr/local/bin/yq
+echo "✅ yq $(yq --version) installed"
 
-yq --version
-
-echo "✅ yq installed successfully!"

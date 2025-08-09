@@ -4,18 +4,27 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: "Target environment to bootstrap (dev, prod, or both)"
+        description: "Environment to bootstrap (dev, prod, or both)"
         required: true
         default: dev
       confirm:
-        description: "Type YES to confirm bootstrapping prod or both"
+        description: "Type YES to confirm bootstrapping prod/both"
         required: false
         default: ""
+      run_verifications:
+        description: "Run post-bootstrap verify steps (true/false)"
+        required: false
+        default: "true"
+
+concurrency:
+  group: bootstrap-${{ github.ref }}-${{ inputs.environment }}
+  cancel-in-progress: false
 
 jobs:
   bootstrap:
-    name: Bootstrap GitOps stack
+    name: GitOps Stack Bootstrap
     runs-on: ubuntu-latest
+    timeout-minutes: 25
 
     permissions:
       contents: write
@@ -27,280 +36,128 @@ jobs:
       FLUX_GITHUB_TOKEN: ${{ secrets.FLUX_SYSTEM_PAT }}
 
     steps:
-      # 1. Validate dispatch input
-      - name: Validate input
-        id: validate
-        run: |
-          set -euo pipefail
-          TARGET="${{ inputs.environment }}"
-          CONFIRM="${{ inputs.confirm }}"
-          echo "📍 Requested bootstrap: ${TARGET}"
-          case "${TARGET}" in
-            dev|prod|both) ;;
-            *) echo "❌ Invalid environment '${TARGET}'. Must be dev, prod, or both."; exit 1 ;;
-          esac
-          if [[ "${TARGET}" != "dev" && "${CONFIRM}" != "YES" ]]; then
-            echo "❌ Confirmation required to bootstrap '${TARGET}'. Aborting."
-            exit 1
-          fi
-          echo "target=${TARGET}" >> "$GITHUB_OUTPUT"
-
-      # 2. Checkout repository
-      - name: Checkout repository
+      - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      # 3. Debug token presence
-      - name: Debug token presence
+      - name: 🔐 Mask sensitive secrets
         run: |
-          echo "→ GITHUB_TOKEN present?      $( [ -z \"$GITHUB_TOKEN\" ] && echo no || echo yes )"
-          echo "→ FLUX_GITHUB_TOKEN present? $( [ -z \"$FLUX_GITHUB_TOKEN\" ] && echo no || echo yes )"
+          echo "::add-mask::$GITHUB_TOKEN"
+          echo "::add-mask::$FLUX_GITHUB_TOKEN"
+          echo "::add-mask::${{ secrets.KUBE_CONFIG_DATA }}"
 
-      # 4. Restore kubeconfig & verify access
-      - name: Restore kubeconfig
+      - name: 🔧 Install CLI tools
+        run: ./scripts/install/install-all.sh
+
+      - name: 🧠 Validate environment inputs
+        id: validate
+        uses: ./.github/actions/validate-env
+        with:
+          environment: ${{ inputs.environment }}
+          confirm: ${{ inputs.confirm }}
+
+      - name: 🧩 Export mappings
+        id: export
+        uses: ./.github/actions/export-env-list
+        with:
+          target: ${{ steps.validate.outputs.target }}
+
+      - name: 🧼 Lint scripts and workflows
+        run: |
+          shellcheck scripts/**/*.sh || echo "ShellCheck warnings"
+          yamllint .github/**/*.yaml || echo "YAML lint warnings"
+
+      - name: 🧪 Validate CLI versions
+        run: ./scripts/utils/validate-version-keys.sh
+
+      - name: 🔐 Restore kubeconfig
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 --decode > ~/.kube/config
-          kubectl config use-context remote-cloudflare
-          echo "🔑 Kubeconfig restored and context set: $(kubectl config current-context)"
-      - name: Verify cluster access
-        run: kubectl get nodes
+          chmod 600 ~/.kube/config
 
-      # 5. Validate CLI version keys
-      - name: Validate CLI version keys
+      - name: 🩺 Check cluster accessibility
+        shell: bash
         run: |
-          chmod +x ./scripts/utils/validate-version-keys.sh
-          ./scripts/utils/validate-version-keys.sh
-
-      # 6. Install required CLI tooling
-      - name: Install CLI tools
-        uses: ./.github/actions/tool-install
-
-      # 7. Set target environments
-      - name: Set target environments
-        id: envs
-        run: |
-          TARGET="${{ steps.validate.outputs.target }}"
-          if [[ "$TARGET" == "both" ]]; then
-            echo "list=dev prod" >> "$GITHUB_OUTPUT"
-          else
-            echo "list=${TARGET}" >> "$GITHUB_OUTPUT"
-          fi
-
-      # 8. Ensure target namespaces exist
-      - name: Create target namespaces
-        run: |
-          for NS in ${{ steps.envs.outputs.list }}; do
-            echo "🔧 Ensuring namespace '${NS}' exists..."
-            kubectl create ns "${NS}" 2>/dev/null || echo "✔️  Namespace '${NS}' already present"
+          set -euo pipefail
+          for ENV in ${{ steps.export.outputs.list }}; do
+            CTX_VAR="CTX_${ENV}"
+            CTX="${!CTX_VAR}"
+            echo "🔑 [$ENV] Context: $CTX"
+            kubectl --context="$CTX" get nodes -o wide
           done
 
-      # 9. Install Kyverno
-      - name: Install Kyverno
-        run: |
-          set -euo pipefail
-          helm repo add kyverno https://kyverno.github.io/kyverno/ >/dev/null
-          helm repo update >/dev/null
-          kubectl create ns kyverno 2>/dev/null || echo "✔️ Namespace 'kyverno' already present"
-          helm upgrade --install kyverno kyverno/kyverno \
-            --namespace kyverno \
-            --set installCRDs=true \
-            --wait \
-            --timeout=60s \
-            --no-hooks \
-            --debug
-          kubectl delete job kyverno-clean-reports -n kyverno || true
+      - name: 🔒 Ensure bootstrap script is executable
+        run: chmod +x scripts/bootstrap/bootstrap-env.sh
 
-      - name: Verify Kyverno components
+      - name: ⏱️ Bootstrap per environment
+        shell: bash
         run: |
           set -euo pipefail
-          COMPONENTS=(
-            kyverno-admission-controller
-            kyverno-background-controller
-            kyverno-cleanup-controller
-            kyverno-reports-controller
-          )
-          echo "🧪 Starting Kyverno rollout verification..."
-          SUCCESS=(); TIMEOUT=(); NOT_FOUND=()
-          for DEPLOY in "${COMPONENTS[@]}"; do
-            echo "---"
-            echo "🔍 Checking rollout status of $DEPLOY..."
-            if ! kubectl get deployment "$DEPLOY" -n kyverno &>/dev/null; then
-              echo "⚠️ '$DEPLOY' not found — skipping"
-              NOT_FOUND+=("$DEPLOY")
-              continue
+          SUMMARY=".bootstrap-summary"
+          : > "$SUMMARY"
+          for ENV in ${{ steps.export.outputs.list }}; do
+            echo "::group::▶️ [$ENV] Bootstrap"
+            CTX_VAR="CTX_${ENV}"; CTX="${!CTX_VAR:-}"
+            BRANCH_VAR="BRANCH_${ENV}"; BRANCH="${!BRANCH_VAR:-}"
+            PATH_VAR="PATH_${ENV}"; PATH_ARG="${!PATH_VAR:-}"
+            if [[ -z "$CTX" || -z "$BRANCH" || -z "$PATH_ARG" ]]; then
+              echo "❌ Missing mapping for $ENV (CTX='${CTX:-}', BRANCH='${BRANCH:-}', PATH='${PATH_ARG:-}')"
+              exit 1
             fi
-            if ! kubectl rollout status deployment/"$DEPLOY" -n kyverno --timeout=5s; then
-              echo "⚠️ '$DEPLOY' timed out"
-              TIMEOUT+=("$DEPLOY")
-            else
-              echo "✅ '$DEPLOY' rolled out"
-              SUCCESS+=("$DEPLOY")
-            fi
-          done
-          echo "---"
-          echo "📦 Final Kyverno pod snapshot:"
-          kubectl get pods -n kyverno -o wide
-          echo ""
-          echo "📊 Kyverno Rollout Summary:"
-          printf "| %-35s | %-10s |\n" "Component" "Status"
-          printf "|%s|%s|\n" "$(printf '%.0s-' {1..37})" "$(printf '%.0s-' {1..12})"
-          for ITEM in "${SUCCESS[@]}";   do printf "| %-35s | ✅ Success   |\n" "$ITEM"; done
-          for ITEM in "${TIMEOUT[@]}";   do printf "| %-35s | ⚠️ Timeout   |\n" "$ITEM"; done
-          for ITEM in "${NOT_FOUND[@]}"; do printf "| %-35s | ❌ Not Found |\n" "$ITEM"; done
-          echo "🚦 Rollout check complete."
-
-      # 10. Install Traefik
-      - name: Prune stale Traefik IngressClass
-        run: |
-          set -euo pipefail
-          echo "::group::Prune IngressClass 'traefik'"
-          echo "📋 Before prune:"
-          kubectl get ingressclass -oyaml || true
-          if kubectl get ingressclass traefik >/dev/null 2>&1; then
-            echo "🗑️ Deleting ingressclass/traefik..."
             START=$(date +%s)
-            kubectl delete ingressclass traefik --timeout=30s || true
-            # If still present, inspect and remove finalizers
-            if kubectl get ingressclass traefik >/dev/null 2>&1; then
-              echo "⚠️ Still present after delete — checking finalizers and events"
-              kubectl get ingressclass traefik -oyaml
-              kubectl get events --sort-by=.lastTimestamp -A | tail -n 100 || true
-              echo "🔧 Patching out finalizers (if any)"
-              kubectl patch ingressclass traefik --type=merge -p '{"metadata":{"finalizers":[]}}' || true
-              kubectl delete ingressclass traefik --ignore-not-found --timeout=30s || true
+            echo "• context=$CTX • branch=$BRANCH • path=$PATH_ARG"
+            ./scripts/bootstrap/bootstrap-env.sh "$ENV" "$CTX" "$BRANCH" "$PATH_ARG"
+            if [[ "${{ inputs.run_verifications }}" == "true" ]]; then
+              echo "::group::🔒 [$ENV] Verifying Flux"
+              ./scripts/verify/verify-flux.sh
+              echo "::endgroup::"
+              echo "::group::🛡️ [$ENV] Verifying Kyverno"
+              ./scripts/verify/verify-kyverno.sh
+              echo "::endgroup::"
+              echo "::group::🌐 [$ENV] Verifying Traefik"
+              ./scripts/verify/verify-traefik.sh
+              echo "::endgroup::"
+            else
+              echo "🧪 Skipping post-bootstrap verifications (run_verifications=false)"
             fi
             END=$(date +%s)
-            echo "⏱️ Prune duration: $((END-START))s"
-          else
-            echo "ℹ️ ingressclass/traefik not found — nothing to prune"
-          fi
-          echo "📋 After prune:"
-          kubectl get ingressclass || true
-          echo "::endgroup::"
-
-      - name: Install Traefik
-        run: |
-          set -euo pipefail
-          echo "::group::Resolve versions"
-          TRAEFIK_APP=$(yq e -r '.traefikApp' .github/versions.yaml | sed 's/^v//')
-          TRAEFIK_CHART=$(yq e -r '.traefikChart' .github/versions.yaml | sed 's/^v//')
-          echo "📦 app version: $TRAEFIK_APP   chart version: $TRAEFIK_CHART"
-          echo "::endgroup::"
-          echo "::group::Detect LoadBalancer controller"
-          HAS_LB=false
-          if kubectl get pods -n metallb-system 2>/dev/null | grep -qi 'controller'; then
-            echo "✅ Detected MetalLB"
-            HAS_LB=true
-          fi
-          if kubectl get ds -n kube-system 2>/dev/null | grep -qi 'klipper-lb'; then
-            echo "✅ Detected k3s servicelb (klipper-lb)"
-            HAS_LB=true
-          fi
-          if kubectl get pods -A 2>/dev/null | grep -q 'svclb-'; then
-            echo "✅ Detected svclb-* pods (k3s servicelb)"
-            HAS_LB=true
-          fi
-          if [ "$HAS_LB" = true ]; then
-            echo "🌐 LoadBalancer available — using Service type=LoadBalancer"
-            SVC_FLAGS=()
-          else
-            echo "⚠️ No LoadBalancer controller detected — using Service type=NodePort"
-            # Pin ports if you want predictable access
-            SVC_FLAGS=(--set service.type=NodePort \
-                       --set service.nodePorts.http=30080 \
-                       --set service.nodePorts.https=30443)
-          fi
-          echo "::endgroup::"
-          echo "::group::Prepare repo and namespace"
-          helm repo add traefik https://helm.traefik.io/traefik >/dev/null
-          helm repo update >/dev/null
-          kubectl create ns traefik 2>/dev/null || echo "✔️ Namespace 'traefik' already present"
-          echo "::endgroup::"
-          dump_debug() {
-            echo "::group::Traefik debug dump"
-            kubectl get svc traefik -n traefik -oyaml || true
-            kubectl get all -n traefik -o wide || true
-            kubectl get events -n traefik --sort-by=.lastTimestamp | tail -n 200 || true
-            kubectl describe deployment traefik -n traefik || true
-            for p in $(kubectl get pods -n traefik -o name 2>/dev/null); do
-              echo "--- logs for $p"
-              kubectl logs "$p" -n traefik --tail=200 || true
-            done
+            DURATION=$((END - START))
+            printf "⏱️ • %-6s took %4ds\n" "$ENV" "$DURATION" >> "$SUMMARY"
             echo "::endgroup::"
-          }
-          trap 'dump_debug' ERR
-          echo "::group::Helm upgrade/install Traefik"
-          START=$(date +%s)
-          helm upgrade --install traefik traefik/traefik \
-            --namespace traefik \
-            --version "$TRAEFIK_CHART" \
-            --set image.tag="$TRAEFIK_APP" \
-            --set additionalArguments="{--providers.kubernetescrd}" \
-            "${SVC_FLAGS[@]}" \
-            --wait \
-            --timeout=120s \
-            --atomic \
-            --debug
-          END=$(date +%s)
-          echo "⏱️ Helm install duration: $((END-START))s"
-          echo "::endgroup::"
-          echo "::group::Post-install verification"
-          kubectl rollout status deployment/traefik -n traefik --timeout=60s
-          kubectl get svc traefik -n traefik -o wide
-          kubectl get pods -n traefik -o wide
-          kubectl get events -n traefik --sort-by=.lastTimestamp | tail -n 100
-          echo "::endgroup::"
-
-      # 11. Clean up any Flux CRDs stuck in Terminating
-      - name: Cleanup stuck Flux CRDs
-        run: |
-          for crd in kustomizations.kustomize.toolkit.fluxcd.io gitrepositories.source.toolkit.fluxcd.io; do
-            if kubectl get crd $crd &>/dev/null; then
-              echo "🗑️  Patching out finalizers on $crd"
-              kubectl patch crd $crd --type=merge -p '{"metadata":{"finalizers":[]}}'
-              echo "🗑️  Deleting CRD $crd"
-              kubectl delete crd $crd --ignore-not-found --wait=false --force --grace-period=0
-            fi
           done
+          mv "$SUMMARY" "$GITHUB_WORKSPACE/.bootstrap-summary"
 
-      # 12. Ensure flux-system namespace exists
-      - name: Ensure flux-system namespace exists
-        run: kubectl create namespace flux-system || echo "✔️ flux-system already exists"
-
-      # 13. Flux bootstrap per environment
-      - name: Flux bootstrap for environment(s)
+      - name: 🧾 Tool versions
         run: |
-          set -xeuo pipefail
-          for ENV in ${{ steps.envs.outputs.list }}; do
-            echo "⚡ Checking if Flux already bootstrapped for '${ENV}'…"
-            if kubectl get kustomization -n flux-system "${ENV}" &>/dev/null; then
-              echo "✅ Already bootstrapped for '${ENV}' — skipping."
-              continue
-            fi
-            echo "🚀 Bootstrapping Flux for '${ENV}'…"
-            flux bootstrap github \
-              --context=remote-cloudflare \
-              --owner="${OWNER}" \
-              --repository="${REPO}" \
-              --branch="${ENV}" \
-              --path="infrastructure/flux/flux-system/manifests" \
-              --personal \
-              --token-auth \
-              --log-level=debug
-          done
+          helm version --short
+          kubectl version --client --short
+          kustomize version
+          flux --version
+          yq --version
+          trivy --version | head -n1
+          kubeconform -v
 
-      # 14. Verify Flux reconciliation
-      - name: Verify Flux reconciliation
-        run: flux get kustomizations --context=remote-cloudflare
-
-      - name: Manual reconciliation and verification
+      - name: 📝 Job summary
+        if: always()
         run: |
-          echo "📡 Reconcile source and kustomization"
-          flux reconcile source git flux-system --context=remote-cloudflare
-          flux reconcile kustomization flux-system --context=remote-cloudflare
-      
-          echo "📍 Kustomizations overview:"
-          flux get kustomizations -A --context=remote-cloudflare
-      
-          echo "📦 Deployment status across namespaces:"
-          kubectl --context=remote-cloudflare get deployments -A
+          {
+            echo "## Bootstrap summary"
+            echo ""
+            cat "$GITHUB_WORKSPACE/.bootstrap-summary"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 📁 Upload snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: infra-snapshot-${{ steps.validate.outputs.target }}
+          path: artifacts/bootstrap/
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: 🧹 Optional cleanup
+        if: always()
+        run: rm -f ~/.kube/config || true
+
+      - name: 🎉 Final confirmation
+        run: echo "✅ Infrastructure bootstrapped successfully."

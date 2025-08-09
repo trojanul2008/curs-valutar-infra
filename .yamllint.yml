@@ -1,7 +1,6 @@
 extends: default
 
 ignore: |
-  infrastructure/flux/flux-system/manifests/flux-system/gotk-components.yaml
   infrastructure/flux/flux-system/manifests/flux-controllers.yaml
 
 rules:

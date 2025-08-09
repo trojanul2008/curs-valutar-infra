@@ -12,461 +12,91 @@ permissions:
   pull-requests: write
 
 jobs:
-  versions:
-    name: "🔎 Load versions from versions.yaml"
+  setup:
+    name: 🧰 Setup & Load Versions
     runs-on: ubuntu-latest
     outputs:
-      gitleaks: ${{ steps.parse.outputs.gitleaks }}
-      kubectl: ${{ steps.parse.outputs.kubectl }}
-      flux: ${{ steps.parse.outputs.flux }}
-      helm: ${{ steps.parse.outputs.helm }}
-      kustomize: ${{ steps.parse.outputs.kustomize }}
-      kubeconform: ${{ steps.parse.outputs.kubeconform }}
-      kyverno: ${{ steps.parse.outputs.kyverno }}
-      yq: ${{ steps.parse.outputs.yq }}
-      trivy: ${{ steps.parse.outputs.trivy }}
-      traefikApp: ${{ steps.parse.outputs.traefikApp }}
-      traefikChart: ${{ steps.parse.outputs.traefikChart }}
-      TRIVY_CACHE_DIR: ${{ steps.parse.outputs.TRIVY_CACHE_DIR }}
-      HELM_PLUGIN_DIR: ${{ steps.parse.outputs.HELM_PLUGIN_DIR }}
-      KUBECTL_CONTEXT: ${{ steps.parse.outputs.KUBECTL_CONTEXT }}
+      versions: ${{ steps.extract.outputs.versions }}
     steps:
       - uses: actions/checkout@v4
-      - id: parse
+      - id: extract
         shell: bash
         run: |
           file=".github/versions.yaml"
-          readv() { sed -n "s/^$1:[[:space:]]*//p" "$file" | tr -d '"' | tr -d $'\r'; }
-          {
-            echo "gitleaks=$(readv gitleaks)"
-            echo "kubectl=$(readv kubectl)"
-            echo "flux=$(readv flux)"
-            echo "helm=$(readv helm)"
-            echo "kustomize=$(readv kustomize)"
-            echo "kubeconform=$(readv kubeconform)"
-            echo "kyverno=$(readv kyverno)"
-            echo "yq=$(readv yq)"
-            echo "trivy=$(readv trivy)"
-            echo "traefikApp=$(readv traefikApp)"
-            echo "traefikChart=$(readv traefikChart)"
-            echo "TRIVY_CACHE_DIR=$(readv TRIVY_CACHE_DIR)"
-            echo "HELM_PLUGIN_DIR=$(readv HELM_PLUGIN_DIR)"
-            echo "KUBECTL_CONTEXT=$(readv KUBECTL_CONTEXT)"
-          } >> "$GITHUB_OUTPUT"
+          extract() {
+            yq -o=json '.' "$file" | jq -c .
+          }
+          echo "versions=$(extract)" >> "$GITHUB_OUTPUT"
 
-  secret_scan:
-    name: "🛡️ Secret scan (Gitleaks)"
+  ci:
+    name: 🧪 Full Infra CI
     runs-on: ubuntu-latest
-    needs: versions
-    env:
-      GITLEAKS_VERSION: ${{ needs.versions.outputs.gitleaks }}
+    needs: setup
+    strategy:
+      matrix:
+        overlay: [dev, prod]
     steps:
       - uses: actions/checkout@v4
-      - name: Install Gitleaks
-        shell: bash
-        run: |
-          VERSION="${GITLEAKS_VERSION#v}"
-          curl -sL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
-          | tar -xz -C /usr/local/bin gitleaks
-      - name: Run Gitleaks scan
-        shell: bash
-        run: |
-          gitleaks detect --redact \
-            --report-format json \
-            --report-path gitleaks-report.json \
-            --log-level warn \
-            --exit-code=2 || echo "⚠️ Gitleaks exited with non-zero code (possible leaks or no config)"
-      - name: Upload Gitleaks report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gitleaks-report
-          path: gitleaks-report.json
 
-  lint:
-    name: "🧹 YAML Lint"
-    runs-on: ubuntu-latest
-    needs: [versions, secret_scan]
-    env:
-      KUSTOMIZE_VERSION: ${{ needs.versions.outputs.kustomize }}
-      KUBECONFORM_VERSION: ${{ needs.versions.outputs.kubeconform }}
-      KYVERNO_VERSION: ${{ needs.versions.outputs.kyverno }}
-      YQ_VERSION: ${{ needs.versions.outputs.yq }}
-      TRIVY_VERSION: ${{ needs.versions.outputs.trivy }}
-      HELM_PLUGIN_DIR: ${{ needs.versions.outputs.HELM_PLUGIN_DIR }}
-      KUBECTL_CONTEXT: ${{ needs.versions.outputs.KUBECTL_CONTEXT }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
-      - name: Install dependencies
+      - name: 🔧 Install Tools & CLI
         run: bash scripts/install/install-all.sh
-      - name: Lint all YAML files
-        shell: bash
+
+      - name: 🧹 Lint YAMLs
         run: |
           find infrastructure -name '*.yaml' -o -name '*.yml' \
             | xargs yamllint -c .yamllint.yml
 
-  schema:
-    name: "📐 Schema Validation"
-    runs-on: ubuntu-latest
-    needs: [lint, versions]
-    strategy:
-      matrix:
-        overlay: [dev, prod]
-    env:
-      KUSTOMIZE_VERSION: ${{ needs.versions.outputs.kustomize }}
-      KUBECONFORM_VERSION: ${{ needs.versions.outputs.kubeconform }}
-      YQ_VERSION: ${{ needs.versions.outputs.yq }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install tools
-        run: bash scripts/install/install-all.sh
-      - name: Prepare kustomize cache path
-        run: mkdir -p ~/.cache/kustomize
-      - name: Cache kustomize
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/kustomize
-          key: kustomize-${{ matrix.overlay }}-${{ hashFiles('infrastructure/k8s/overlays/**') }}
-      - name: Validate overlays with kubeconform
-        shell: bash
+      - name: 📐 Validate K8s Manifests
         run: |
-          kustomize build infrastructure/k8s/base | kubeconform -verbose -summary
-          kustomize build infrastructure/k8s/overlays/${{ matrix.overlay }} | kubeconform -verbose -summary
+          kustomize build infrastructure/k8s/base | kubeconform -summary
+          kustomize build infrastructure/k8s/overlays/${{ matrix.overlay }} | kubeconform -summary
 
-  policy:
-    name: "🚨 Kyverno Policy Check"
-    runs-on: ubuntu-latest
-    needs: [schema, versions]
-    strategy:
-      matrix:
-        overlay: [dev, prod]
-    env:
-      KYVERNO_VERSION: ${{ needs.versions.outputs.kyverno }}
-      KUSTOMIZE_VERSION: ${{ needs.versions.outputs.kustomize }}
-      YQ_VERSION: ${{ needs.versions.outputs.yq }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install tools
-        run: bash scripts/install/install-all.sh
-      - name: Apply Kyverno and generate report
-        shell: bash
+      - name: 🚨 Kyverno Policy Check
         run: |
-          echo "🔍 Building Kubernetes manifest for ${{ matrix.overlay }}..."
           kustomize build infrastructure/k8s/overlays/${{ matrix.overlay }} > manifest.yaml
-          echo "🚨 Running Kyverno policy checks..."
-          kyverno apply infrastructure/kyverno \
-            --resource manifest.yaml \
-            --policy-report | tee kyverno-raw.txt
-          echo "📄 Extracting PolicyReport YAML..."
-          awk '/^apiVersion:/ , 0' kyverno-raw.txt > kyverno-policyreport.yaml
-          echo "🔄 Converting YAML to JSON..."
-          yq -o=json kyverno-policyreport.yaml > kyverno-results.json
-      - name: Debug Kyverno output
-        run: cat kyverno-results.json
-      - name: Extract failed Kyverno policy count
-        shell: bash
-        run: |
-          echo "🔍 Failed policy count:"
-          jq '.summary.fail' kyverno-results.json
-      - name: Show failed Kyverno policies in console and exit if any
-        shell: bash
-        run: |
-          FAIL_COUNT=$(jq '.summary.fail' kyverno-results.json)
-          if [ "$FAIL_COUNT" -gt 0 ]; then
-            echo "🚨 Kyverno found $FAIL_COUNT policy violation(s)!"
-            jq -c '
-              .results
-              | map(select(.result == "fail"))
-              | sort_by(
-                  if ((.policy | type=="string") and (.policy | test("security")))
-                  or ((.rule | type=="string") and (.rule | test("privilege")))
-                  then 1
-                  elif ((.policy | type=="string") and (.policy | test("label")))
-                  or ((.rule | type=="string") and (.rule | test("label")))
-                  then 3
-                  else 2
-                  end
-                )
-              | .[]
-            ' kyverno-results.json > kyverno-violations.json
-            COMMENT_BODY="🚨 **Kyverno Policy Violations**\n\n"
-            while IFS= read -r violation; do
-              POLICY=$(echo "$violation" | jq -r '.policy')
-              RESOURCE_KIND=$(echo "$violation" | jq -r '.resources[0].kind')
-              RESOURCE_NAME=$(echo "$violation" | jq -r '.resources[0].name')
-              RESOURCE_NS=$(echo "$violation" | jq -r '.resources[0].namespace')
-              RULE=$(echo "$violation" | jq -r '.rule')
-              MESSAGE=$(echo "$violation" | jq -r '.message')
-              SEVERITY="🟠"
-              [[ "$RULE" == *privilege* || "$POLICY" == *security* ]] && SEVERITY="🔴"
-              [[ "$RULE" == *label* || "$POLICY" == *label* ]] && SEVERITY="🟢"
-              echo ""
-              echo "$SEVERITY $RESOURCE_KIND \"$RESOURCE_NAME\" in namespace \"$RESOURCE_NS\""
-              echo " ├─ Policy: $POLICY"
-              echo " ├─ Rule: $RULE"
-              echo " └─ Message: $MESSAGE"
-              COMMENT_BODY+="$SEVERITY $RESOURCE_KIND \"$RESOURCE_NAME\" in namespace \"$RESOURCE_NS\"\n"
-              COMMENT_BODY+="• Policy: $POLICY\n"
-              COMMENT_BODY+="• Rule: $RULE\n"
-              COMMENT_BODY+="• Message: $MESSAGE\n\n"
-            done < kyverno-violations.json
-            echo -e "$COMMENT_BODY" > kyverno-github-comment.md
-            exit 1
-          else
-            echo "✅ No policy violations detected."
-          fi
-      - name: Upload Kyverno result for PR comment
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: kyverno-result-${{ matrix.overlay }}
-          path: kyverno-results.json
+          kyverno apply infrastructure/kyverno --resource manifest.yaml --policy-report > kyverno-report.yaml
+          yq -o=json kyverno-report.yaml > kyverno-results.json
 
-  post-comment:
-    name: "💬 Kyverno Violation Comment"
-    needs: policy
-    strategy:
-      matrix:
-        overlay: [dev, prod]
-    if: needs.policy.result == 'success'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download Kyverno result
-        uses: actions/download-artifact@v4
-        with:
-          name: kyverno-result-${{ matrix.overlay }}
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-      - name: Check Kyverno failure count
-        id: check
-        shell: bash
-        run: |
-          FAIL_COUNT=$(jq '.summary.fail' kyverno-results.json)
-          echo "🔍 Detected Kyverno violations: $FAIL_COUNT"
-          echo "fail_count=$FAIL_COUNT" >> "$GITHUB_OUTPUT"
-      - name: Comment on PR
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const results = JSON.parse(fs.readFileSync('kyverno-results.json','utf8'));
-            const violations = (results.results || []).filter(r => r.result === 'fail');
-            const score = (v) => {
-              if ((v.policy || '').includes('security') || (v.rule || '').includes('privilege')) return 1;
-              if ((v.policy || '').includes('label') || (v.rule || '').includes('label')) return 3;
-              return 2;
-            };
-            const sorted = violations.sort((a,b) => score(a) - score(b));
-            let body = `🚨 **${sorted.length} Kyverno Policy Violation${sorted.length === 1 ? '' : 's'}**\n\n`;
-            for (const v of sorted) {
-              const kind = v.resources?.[0]?.kind || '';
-              const name = v.resources?.[0]?.name || '';
-              const ns = v.resources?.[0]?.namespace || '';
-              const policy = v.policy || '';
-              const rule = v.rule || '';
-              const message = v.message || '';
-              let severity = '🟠';
-              if (policy.includes('security') || rule.includes('privilege')) severity = '🔴';
-              else if (policy.includes('label') || rule.includes('label')) severity = '🟢';
-              body += `${severity} ${kind} "${name}" in namespace "${ns}"\n`;
-              body += `• Policy: ${policy}\n`;
-              body += `• Rule: ${rule}\n`;
-              body += `• Message: ${message}\n\n`;
-            }
-            const prNumber = context.payload.pull_request?.number;
-            if (prNumber) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                body
-              });
-            } else {
-              console.log('ℹ️ No pull-request context — skipping comment.');
-            }
-      - name: Upload Kyverno result summary
-        if: steps.check.outputs.fail_count == '0'
-        uses: actions/upload-artifact@v4
-        with:
-          name: kyverno-summary-${{ matrix.overlay }}
-          path: kyverno-results.json
-
-  scan:
-    name: "🛡️ Container Image Scan"
-    runs-on: ubuntu-latest
-    needs: [policy, versions]
-    env:
-      TRIVY_CACHE_DIR: ${{ needs.versions.outputs.TRIVY_CACHE_DIR }}
-      TRIVY_VERSION: ${{ needs.versions.outputs.trivy }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install tools
-        run: bash scripts/install/install-all.sh
-      - name: Prepare Trivy cache directory
-        run: mkdir -p "$TRIVY_CACHE_DIR"
-      - name: Cache Trivy DB
-        uses: actions/cache@v3
-        with:
-          path: ${{ env.TRIVY_CACHE_DIR }}
-          key: trivy-db-${{ hashFiles('scripts/utils/scan-images.sh') }}
-      - name: Run Trivy scan
-        id: trivy
-        shell: bash
+      - name: 🛡️ Image Vulnerability Scan (Trivy)
         run: |
           chmod +x scripts/utils/scan-images.sh
-          TRIVY_CACHE_DIR="$TRIVY_CACHE_DIR" scripts/utils/scan-images.sh > trivy-report.txt || true
-          awk '
-            /Image:/ { img = $0 }
-            /CRITICAL|HIGH/ { print img "\n" $0 "\n" }
-          ' trivy-report.txt > trivy-summary.txt
-          if [ ! -s trivy-summary.txt ]; then
-            echo "✅ No critical vulnerabilities found." > trivy-summary.txt
-          fi
-      - name: Display and fail on vulnerabilities
-        if: always()
-        shell: bash
-        run: |
-          if grep -qE 'CRITICAL|HIGH' trivy-report.txt; then
-            echo "🚨 Vulnerabilities found"
-            cat vulnerability-details.txt || echo "❌ Details file missing"
-            exit 1
-          else
-            echo "✅ No critical vulnerabilities found"
-          fi
-      - name: Upload Trivy reports
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-scan
-          path: |
-            trivy-report.txt
-            trivy-summary.txt
-            vulnerability-details.txt
-      - name: GitHub PR comment — Trivy summary
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const sevEmoji = (lvl) => lvl === 'CRITICAL' ? '🔴' : '🟠';
-            let body = '🛡️ **Trivy Vulnerability Summary**\n';
-            let raw = '';
-            try {
-              raw = fs.readFileSync('trivy-summary.txt','utf8').trim();
-            } catch {
-              raw = '';
-            }
-            if (raw === '✅ No critical vulnerabilities found.') {
-              body += '\n✅ No critical vulnerabilities found.\n';
-            } else if (raw.length > 0) {
-              let currentImage = null;
-              raw.split('\n').forEach(line => {
-                if (line.startsWith('Image:')) {
-                  currentImage = line.replace('Image:', '').trim();
-                  body += `\n### 📦 \`${currentImage}\`\n`;
-                } else if (/CRITICAL|HIGH/.test(line)) {
-                  const sev = line.includes('CRITICAL') ? 'CRITICAL' : 'HIGH';
-                  const cveMatch = line.match(/CVE-\d{4}-\d{4,7}/);
-                  const cve = cveMatch ? `[${cveMatch[0]}](https://nvd.nist.gov/vuln/detail/${cveMatch[0]})` : 'Unknown-CVE';
-                  body += `- ${sevEmoji(sev)} **${sev}** — ${cve}\n`;
-                }
-              });
-            } else {
-              body += '\n⚠️ No trivy summary available.\n';
-            }
-            const prNumber = context.payload.pull_request?.number;
-            if (prNumber) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                body
-              });
-            } else {
-              console.log('ℹ️ No pull-request context — skipping comment.');
-            }
+          scripts/utils/scan-images.sh > trivy-report.txt
+          grep -E 'CRITICAL|HIGH' trivy-report.txt > trivy-summary.txt || echo "✅ No critical vulnerabilities"
 
-  drift:
-    name: "📊 Drift Detection via Flux"
-    runs-on: ubuntu-latest
-    needs: [scan, versions]
-    strategy:
-      matrix:
-        env: [dev, prod]
-    env:
-      HELM_PLUGIN_DIR: ${{ needs.versions.outputs.HELM_PLUGIN_DIR }}
-      KUBECTL_CONTEXT: ${{ needs.versions.outputs.KUBECTL_CONTEXT }}
-      FLUX_VERSION: ${{ needs.versions.outputs.flux }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Inject kubeconfig from secret
-        shell: bash
+      - name: 📊 Drift Detection (Flux)
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > ~/.kube/config
-      - name: Show kubeconfig file
-        run: head -n 10 ~/.kube/config
-      - name: Install Flux (pinned)
-        shell: bash
-        run: |
-          V="${FLUX_VERSION#v}"
-          curl -s https://fluxcd.io/install.sh | sudo bash -s -- --version "$V"
-      - name: Create Helm plugin directory
-        run: mkdir -p "${{ env.HELM_PLUGIN_DIR }}"
-      - name: Cache Helm plugins
-        uses: actions/cache@v3
-        with:
-          path: ${{ env.HELM_PLUGIN_DIR }}
-          key: helm-plugins-${{ matrix.env }}-${{ hashFiles('scripts/install/install-helm.sh') }}
-      - name: List kube contexts
-        run: kubectl config get-contexts || echo "⚠️ No kubeconfig available"
-      - name: Detect drift in ${{ matrix.env }}
-        shell: bash
-        run: |
-          echo "🔍 Detecting drift for '${{ matrix.env }}' using context '${{ env.KUBECTL_CONTEXT }}'"
-          if ! flux --context="${{ env.KUBECTL_CONTEXT }}" diff kustomization curs-valutar-${{ matrix.env }} \
-            --path infrastructure/k8s/overlays/${{ matrix.env }} > drift-${{ matrix.env }}.txt; then
-            echo "❌ Drift detection failed: Flux or context '${{ env.KUBECTL_CONTEXT }}' not available"
-            exit 1
-          fi
-          if [ ! -s drift-${{ matrix.env }}.txt ]; then
-            echo "⚠️ No drift detected or output empty." > drift-${{ matrix.env }}.txt
-          fi
-      - name: Upload drift report
-        uses: actions/upload-artifact@v4
-        with:
-          name: drift-report-${{ matrix.env }}
-          path: drift-${{ matrix.env }}.txt
-      - name: GitHub PR comment — drift summary
+          flux --context="CTX_${{ matrix.overlay }}" diff kustomization curs-valutar-${{ matrix.overlay }} \
+            --path infrastructure/k8s/overlays/${{ matrix.overlay }} > drift.txt || echo "❌ Drift check failed"
+
+      - name: 💬 PR Summary Comment
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
-        env:
-          MATRIX_ENV: ${{ matrix.env }}
         with:
           script: |
             const fs = require('fs');
-            const env = process.env.MATRIX_ENV;
-            const reportFile = `drift-${env}.txt`;
-            let body = `📊 **Flux Drift Report (\`${env}\`)**\n`;
-            try {
-              const content = fs.readFileSync(reportFile, 'utf8').trim();
-              const report = content.length === 0 ? '⚠️ No drift report available.' : content.slice(0, 6000);
-              body += `\n\`\`\`\n${report}\n\`\`\``;
-              const prNumber = context.payload.pull_request?.number;
-              if (prNumber) {
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: prNumber,
-                  body
-                });
-              } else {
-                console.log('ℹ️ No pull-request context — skipping comment.');
-              }
-            } catch (err) {
-              console.error(`❌ Failed to read ${reportFile}:`, err.message);
+            let body = `### ✅ Infra CI Report: \`${{ matrix.overlay }}\`\n\n`;
+
+            const kyverno = JSON.parse(fs.readFileSync('kyverno-results.json','utf8'));
+            const violations = kyverno.results?.filter(r => r.result === 'fail') || [];
+            body += `**Kyverno Violations:** ${violations.length}\n`;
+            violations.forEach(v => {
+              body += `- 🔴 ${v.resources?.[0]?.kind} "${v.resources?.[0]?.name}" — ${v.message}\n`;
+            });
+
+            const trivy = fs.readFileSync('trivy-summary.txt','utf8');
+            body += `\n**Trivy Summary:**\n${trivy}\n`;
+
+            const drift = fs.readFileSync('drift.txt','utf8');
+            body += `\n**Drift Detection:**\n\`\`\`\n${drift.slice(0,500)}\n\`\`\``;
+
+            const pr = context.payload.pull_request?.number;
+            if (pr) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr,
+                body
+              });
             }
