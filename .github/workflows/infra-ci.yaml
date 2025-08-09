@@ -96,11 +96,17 @@ jobs:
           set -x
           source scripts/utils/load-version.sh
           export TRIVY_CACHE_DIR=$(get_version TRIVY_CACHE_DIR)
-
           chmod +x scripts/utils/scan-images.sh
           echo "🔎 Running scan-images.sh..."
-          bash scripts/utils/scan-images.sh | tee trivy-full.log.txt
-        continue-on-error: false
+          # 👇 Capture raw output + preserve failure output
+          bash scripts/utils/scan-images.sh "${{ matrix.overlay }}" > trivy-full.log.txt 2>&1
+            echo "❌ Trivy scan failed — displaying full output below"
+            echo "------------------------------------------------"
+            cat trivy-full.log.txt
+            echo "------------------------------------------------"
+            exit 1
+          }
+          echo "✅ Trivy scan passed"
 
       - name: 📝 Trivy Scan Summary
         if: always()
