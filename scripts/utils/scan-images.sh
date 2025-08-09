@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
 
 # ----- Ultra debug prompt, safe under `set -u` -----
-# Show file:line and function name (defaults to "main" at top-level)
 export PS4='[${BASH_SOURCE[0]:-?}:${LINENO} ${FUNCNAME[0]:-main}] '
-
-# Strict mode + xtrace after PS4 is set
 set -Eeuo pipefail
 set -x
 
@@ -33,12 +30,10 @@ OVERLAY_DIR="infrastructure/k8s/overlays/${OVERLAY}"
 TRIVY_BIN="$(command -v trivy || true)"
 TRIVY_CACHE_DIR="${TRIVY_CACHE_DIR:-/tmp/trivy-cache}"
 
-# Ensure dependencies exist
 command -v yq >/dev/null
 command -v jq >/dev/null
 command -v kustomize >/dev/null
 
-# Make sure cache dir exists and is writable
 mkdir -p "$TRIVY_CACHE_DIR"
 chmod 777 "$TRIVY_CACHE_DIR" || true
 
@@ -51,7 +46,6 @@ echo "📁 Trivy cache dir: $TRIVY_CACHE_DIR"
 echo "📄 Overlay YAML files count: $(ls -1 "$OVERLAY_DIR"/*.yaml | wc -l)"
 ls -1 "$OVERLAY_DIR"/*.yaml
 
-# Prepare output dirs
 mkdir -p scan-results/trivy-images
 mkdir -p scan-results/trivy-configs
 
@@ -69,9 +63,9 @@ vulnerable_images=0
 scan_failed=0
 approved_vulnerabilities=()
 
-# ----- Image extraction -----
+# 🔍 Extract images safely
 echo "🔍 Extracting container images from YAMLs..."
-images="$(yq eval '.. | select(has(\"image\")) | .image | select(. != null)' "$OVERLAY_DIR"/*.yaml || true)"
+images="$(yq eval -o=tsv '.. | .image? // empty' "$OVERLAY_DIR"/*.yaml | sort -u || true)"
 
 echo "🧾 Parsed image list:"
 printf '%s\n' "$images"
@@ -82,7 +76,7 @@ if [[ -z "$images" ]]; then
 fi
 
 # ----- Scan loop -----
-for image in $images; do
+while IFS= read -r image; do
   ((total_images++))
   echo "🚀 Scanning image: $image"
 
@@ -113,7 +107,6 @@ for image in $images; do
   echo "📄 Trivy scan output (preview):"
   head -20 "$scan_json" || true
 
-  # Parse vulnerabilities
   if jq -e '.Results[]? | select(.Vulnerabilities != null) | .Vulnerabilities | length > 0' "$scan_json" >/dev/null; then
     while IFS= read -r vuln; do
       vuln_id="$(jq -r '.VulnerabilityID' <<< "$vuln")"
@@ -133,14 +126,13 @@ for image in $images; do
   else
     echo "✅ No critical vulnerabilities found in $image"
   fi
-done
+done <<< "$images"
 
 # ----- Config scan -----
 echo "🛠 Building manifest via Kustomize..."
 kustomize build "$OVERLAY_DIR" > "$manifest_file"
 
 echo "🔎 Running Trivy config scan..."
-# Add --debug to config as well for parity
 if ! "$TRIVY_BIN" config --debug "$manifest_file" | tee "$config_report"; then
   echo "❌ Trivy config scan failed"
   exit 5
@@ -149,7 +141,6 @@ fi
 echo "📜 Trivy config scan (preview):"
 sed -n '1,60p' "$config_report" || true
 
-# ----- Summary -----
 {
   echo ""
   echo "=== Image Scan Summary (${OVERLAY}) ==="
@@ -158,7 +149,6 @@ sed -n '1,60p' "$config_report" || true
   echo "Vulnerable images: $vulnerable_images"
 } >> "$image_report"
 
-# Final checks
 if (( scanned_images == 0 )); then
   echo "⚠️ No images were scanned — check overlay or YAMLs"
   exit 2
