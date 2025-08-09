@@ -68,6 +68,18 @@ jobs:
           set -x
           bash scripts/install/install-all.sh
 
+      - name: 🧬 Dump Environment
+        run: env
+
+      - name: 🗂 Dump File Tree
+        run: find . -type f | sort
+
+      - name: 🔍 Dump Trivy Version & Config Help
+        run: |
+          trivy -v
+          trivy config --help
+          env | grep -i trivy || true
+
       - name: 🧹 Lint YAMLs
         run: |
           set -euo pipefail

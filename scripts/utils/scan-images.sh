@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-set -euo pipefail
+export PS4='[$BASH_SOURCE:$LINENO ${FUNCNAME[0]}()] '
+set -euxo pipefail
+
+# ✅ Enable Trivy internal debugging
+export TRIVY_DEBUG=true
 
 OVERLAY="${1:-dev}"
 OVERLAY_DIR="infrastructure/k8s/overlays/${OVERLAY}"
@@ -12,10 +16,12 @@ if [[ -z "$TRIVY_BIN" ]]; then
 fi
 
 echo "📦 Overlay context: $OVERLAY"
-echo "Trivy version: $($TRIVY_BIN --version | head -1)"
-echo "yq version: $(yq --version)"
-echo "Cache dir: $TRIVY_CACHE_DIR"
-echo "Overlay YAML files: $(ls -1 "$OVERLAY_DIR"/*.yaml | wc -l)"
+echo "🔍 Trivy version: $($TRIVY_BIN --version | head -1)"
+echo "🔍 yq version: $(yq --version)"
+echo "📁 Cache dir: $TRIVY_CACHE_DIR"
+echo "📄 Overlay YAML files count: $(ls -1 "$OVERLAY_DIR"/*.yaml | wc -l)"
+echo "📂 Overlay YAML files list:"
+ls -1 "$OVERLAY_DIR"/*.yaml
 
 mkdir -p scan-results/trivy-images
 mkdir -p scan-results/trivy-configs
@@ -34,15 +40,14 @@ vulnerable_images=0
 scan_failed=0
 approved_vulnerabilities=()
 
-echo "🔍 Extracting images from YAMLs..."
+echo "🔍 Extracting container images from YAMLs..."
 images=$(yq eval '.. | select(has("image")) | .image | select(. != null)' "$OVERLAY_DIR"/*.yaml || true)
 
-# Debug visibility
-echo "🧾 Images found in overlays:"
+echo "🧾 Parsed image list:"
 echo "$images"
 
 if [[ -z "$images" ]]; then
-  echo "⚠️ No container images found — check overlay YAMLs or parsing logic"
+  echo "⚠️ No container images found — check overlay YAMLs or yq query syntax"
   exit 3
 fi
 
@@ -54,23 +59,29 @@ for image in $images; do
   scan_json="scan-results/trivy-images/image-${OVERLAY}-${safe_name}.json"
   error_log="scan-results/trivy-images/error-${safe_name}.log"
 
-  echo "🔧 Running Trivy:"
-  echo "$TRIVY_BIN image $image --severity HIGH,CRITICAL --no-progress --cache-dir $TRIVY_CACHE_DIR -f json -o $scan_json"
+  echo "🔧 Trivy command:"
+  echo "$TRIVY_BIN image \"$image\" --severity HIGH,CRITICAL --no-progress --cache-dir \"$TRIVY_CACHE_DIR\" -f json -o \"$scan_json\""
 
   if ! "$TRIVY_BIN" image "$image" \
+    --debug \
     --severity HIGH,CRITICAL \
     --no-progress \
     --cache-dir "$TRIVY_CACHE_DIR" \
     -f json -o "$scan_json" 2> "$error_log"; then
 
-    echo "❌ Trivy scan failed for $image (exit code: $?)"
-    echo "⚠️ Trivy stderr dump:"
+    echo "❌ Trivy scan failed for $image"
+    echo "⚠️ Exit code: $?"
+    echo "⚠️ stderr from Trivy:"
     cat "$error_log"
+    echo "⚠️ scan_json presence:"
+    ls -lah "$scan_json" || echo "🚫 JSON output not created"
     ((scan_failed++))
     continue
   fi
 
   ((scanned_images++))
+  echo "📄 Trivy scan output (short preview):"
+  head -20 "$scan_json"
 
   if jq -e '.Results[].Vulnerabilities != null' "$scan_json" >/dev/null; then
     while IFS= read -r vuln; do
@@ -103,7 +114,9 @@ if ! "$TRIVY_BIN" config "$manifest_file" | tee "$config_report"; then
   exit 5
 fi
 
-# Final summary
+echo "📜 Trivy config scan output:"
+head -30 "$config_report"
+
 {
   echo ""
   echo "=== Image Scan Summary (${OVERLAY}) ==="
