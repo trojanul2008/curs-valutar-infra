@@ -99,14 +99,19 @@ jobs:
           echo "🔎 Running scan-images.sh..."
           scripts/utils/scan-images.sh > trivy-report.txt
 
-          echo "📄 Extracting vulnerabilities..."
+          echo "📄 Full Trivy Report:"
+          echo "-----------------------------"
+          cat trivy-report.txt || echo "⚠️ Report file missing or unreadable"
+          echo "-----------------------------"
+
+          echo "📄 Extracting CRITICAL/HIGH vulnerabilities..."
           grep -E 'CRITICAL|HIGH' trivy-report.txt > trivy-summary.txt || echo "✅ No critical vulnerabilities found"
 
+          echo "📌 Summary of vulnerabilities:"
+          cat trivy-summary.txt || echo "(none)"
+
           if grep -qE 'CRITICAL|HIGH' trivy-summary.txt; then
-            echo "❌ Vulnerabilities detected:"
-            echo "-----------------------------"
-            cat trivy-summary.txt
-            echo "-----------------------------"
+            echo "❌ Vulnerabilities detected"
             exit 1
           else
             echo "✅ Scan passed — no CRITICAL/HIGH vulnerabilities"
