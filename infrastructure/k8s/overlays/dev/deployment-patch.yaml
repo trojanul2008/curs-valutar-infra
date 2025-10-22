@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: curs-valutar
+  namespace: dev
 spec:
   replicas: 1
   selector:
@@ -9,15 +10,19 @@ spec:
       app: curs-valutar
   template:
     spec:
-      imagePullSecrets:
-        - name: docker-credentials
+      # Ensure processes can write to mounted emptyDir
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
         runAsGroup: 10001
-        fsGroup: 2000
+        fsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
+
+      volumes:
+      - name: tmp-dir
+        emptyDir: {}
+
       containers:
         - name: curs-valutar
           image: trojanul2008/curs-valutar-app:dev-20250731
@@ -28,6 +33,13 @@ spec:
             runAsNonRoot: true
             runAsUser: 10001
             runAsGroup: 10001
+          volumeMounts:
+            - name: tmp-dir
+              mountPath: /tmp
+            - name: tmp-dir
+              mountPath: /var/tmp
+            - name: tmp-dir
+              mountPath: /usr/tmp
           env:
             - name: FLASK_ENV
               value: "development"
@@ -44,3 +56,5 @@ spec:
               memory: "128Mi"
               cpu: "200m"
               ephemeral-storage: "200Mi"
+      imagePullSecrets:
+        - name: docker-credentials
