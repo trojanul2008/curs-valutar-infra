@@ -67,6 +67,9 @@ jobs:
           set -euo pipefail
           set -x
           bash scripts/install/install-all.sh
+          
+      - name: Add user-local bin to PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: 🧬 Dump Environment
         run: env
