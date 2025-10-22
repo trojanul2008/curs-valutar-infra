@@ -144,7 +144,27 @@ jobs:
           snyk test --file=manifest-${{ matrix.overlay }}.yaml || true
 
           # Optional: Checkov config scan
-          checkov -f manifest-${{ matrix.overlay }}.yaml -o json > checkov-${{ matrix.overlay }}.json
+          # Run checkov and always produce JSON output; do not let checkov exit-code break the job
+          checkov -f manifest-${{ matrix.overlay }}.yaml -o json > checkov-${{ matrix.overlay }}.json || true
+
+          # Ensure we have some JSON output from checkov
+          if [ ! -s checkov-${{ matrix.overlay }}.json ]; then
+            echo "⚠️ checkov did not produce JSON output; printing any output (if present) and failing"
+            ls -l checkov-${{ matrix.overlay }}.json || true
+            cat checkov-${{ matrix.overlay }}.json || true
+            exit 1
+          fi
+
+          # Fail the step if checkov JSON contains failed checks
+          if jq -e '.results.failed_checks | length > 0' checkov-${{ matrix.overlay }}.json >/dev/null 2>&1; then
+            echo "❌ Checkov found failed checks:"
+            # Print a summary of failed checks for readability
+            jq -r '.results.failed_checks[] | "- \(.check_id) |\(.file) |\(.resource) |\(.message)"' checkov-${{ matrix.overlay }}.json || true
+            exit 1
+          else
+            echo "✅ Checkov found no failed checks"
+          fi
+
 
       - name: 📝 Extended Scan Summary
         if: always()
