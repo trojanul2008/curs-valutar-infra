@@ -20,8 +20,8 @@ spec:
           type: RuntimeDefault
 
       volumes:
-      - name: tmp-dir
-        emptyDir: {}
+        - name: tmp-dir
+          emptyDir: {}
 
       containers:
         - name: curs-valutar
@@ -56,5 +56,5 @@ spec:
               memory: "128Mi"
               cpu: "200m"
               ephemeral-storage: "200Mi"
-      imagePullSecrets:
-        - name: docker-credentials
+          imagePullSecrets:
+            - name: docker-credentials
