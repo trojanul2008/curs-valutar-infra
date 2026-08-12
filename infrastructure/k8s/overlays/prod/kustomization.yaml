@@ -10,4 +10,4 @@ patches:
 images:
   - name: trojanul2008/curs-valutar-app
     newName: trojanul2008/curs-valutar-app
-    newTag: v1.2.4
+    newTag: v1.2.5
