@@ -46,3 +46,13 @@ spec:
               memory: "256Mi"
               cpu: "500m"
               ephemeral-storage: "200Mi"
+          volumeMounts:
+            - name: tmp-dir
+              mountPath: /tmp
+            - name: tmp-dir
+              mountPath: /var/tmp
+            - name: tmp-dir
+              mountPath: /usr/tmp
+      volumes:
+        - name: tmp-dir
+          emptyDir: {}
