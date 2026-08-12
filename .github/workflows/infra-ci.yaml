@@ -97,7 +97,7 @@ jobs:
 
           chmod +x scripts/utils/scan-images.sh
           echo "🔎 Running scan-images.sh..."
-          scripts/utils/scan-images.sh > trivy-report.txt
+          bash -x scripts/utils/scan-images.sh 2>&1 | tee trivy-report.txt
 
           echo "📄 Extracting vulnerabilities..."
           grep -E 'CRITICAL|HIGH' trivy-report.txt > trivy-summary.txt || echo "✅ No critical vulnerabilities found"
