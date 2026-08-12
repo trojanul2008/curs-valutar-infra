@@ -6,7 +6,8 @@ VERSION=$(get_version trivy)
 INSTALL_DIR="/usr/local/bin"
 
 echo "📥 Installing Trivy v${VERSION} into ${INSTALL_DIR}"
-curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | bash -s -- -b "${INSTALL_DIR}" "v${VERSION}"
+curl -sfL "https://raw.githubusercontent.com/aquasecurity/trivy/v${VERSION}/contrib/install.sh" \
+  | bash -s -- -b "${INSTALL_DIR}" "v${VERSION}"
 
 # Verify and expose path
 if ! command -v trivy &>/dev/null; then

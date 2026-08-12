@@ -7,7 +7,7 @@ kubeconform: 0.6.4
 kyvernoChart: 3.2.7
 kyvernoApp: 1.12.4
 yq: 4.43.1
-trivy: 0.50.1
+trivy: 0.72.0
 traefikApp: 3.5.0
 traefikChart: 37.0.0
 externalSecretsChart: 0.9.8
