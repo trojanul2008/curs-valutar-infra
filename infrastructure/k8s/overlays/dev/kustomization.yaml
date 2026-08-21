@@ -3,6 +3,7 @@ kind: Kustomization
 namespace: dev
 resources:
   - ../../base
+  - argocd-prune-test.yaml
 patches:
   - path: deployment-patch.yaml
   - path: ingress-patch.yaml
