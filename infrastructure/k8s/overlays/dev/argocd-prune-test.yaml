@@ -1,6 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: argocd-prune-test
-data:
-  purpose: "verify Argo CD automated pruning"
