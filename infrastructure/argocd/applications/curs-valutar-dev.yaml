@@ -3,18 +3,17 @@ kind: Application
 metadata:
   name: curs-valutar-dev
   namespace: argocd
+  annotations:
+    argocd.argoproj.io/manifest-generate-paths: .
 spec:
   project: default
-
   source:
     repoURL: https://github.com/trojanul2008/curs-valutar-infra.git
-    targetRevision: dev
+    targetRevision: refs/heads/dev
     path: infrastructure/k8s/overlays/dev
-
   destination:
     server: https://kubernetes.default.svc
     namespace: dev
-
   syncPolicy:
     automated:
       prune: true
