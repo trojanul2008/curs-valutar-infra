@@ -24,3 +24,4 @@ data:
     hs.status = "Progressing"
     hs.message = "Waiting for load balancer address"
     return hs
+  webhook.maxPayloadSizeMB: "2"
