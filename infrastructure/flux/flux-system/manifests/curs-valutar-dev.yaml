@@ -6,7 +6,8 @@ metadata:
 spec:
   interval: 5m
   path: infrastructure/k8s/overlays/dev
-  prune: true
+  prune: false
+  suspend: true
   sourceRef:
     kind: GitRepository
     name: infra-dev
