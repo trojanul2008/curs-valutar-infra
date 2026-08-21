@@ -8,6 +8,8 @@ spec:
     sourceRange:
       - 192.168.1.193/32
       - 192.168.1.58/32
+      - 192.168.2.2/32
+      - 192.168.2.1/32
 ---
 apiVersion: traefik.io/v1alpha1
 kind: IngressRouteTCP
