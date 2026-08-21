@@ -1,24 +1,60 @@
 name: "🏷️ Auto Tag Release on Version Bump"
+
 on:
   push:
     branches: [dev, prod]
     paths:
       - ".github/versions.yaml"
 
+permissions:
+  contents: write
+
 jobs:
   tag:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
-      - name: Parse version and tag
+        with:
+          fetch-depth: 0
+
+      - name: Check kubectl version bump
         id: tagger
+        shell: bash
         run: |
-          VERSION=$(yq '.kubectl' .github/versions.yaml | tr -d '"')
-          TAG="infra-${VERSION}"
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          CURRENT_VERSION=$(yq -r '.kubectl' .github/versions.yaml)
+          BEFORE="${{ github.event.before }}"
+
+          PREVIOUS_VERSION=""
+
+          if git cat-file -e "${BEFORE}:.github/versions.yaml" 2>/dev/null; then
+            PREVIOUS_VERSION=$(git show "${BEFORE}:.github/versions.yaml" | yq -r '.kubectl')
+          fi
+
+          echo "Previous kubectl version: ${PREVIOUS_VERSION:-unknown}"
+          echo "Current kubectl version:  ${CURRENT_VERSION}"
+
+          if [ "$CURRENT_VERSION" = "$PREVIOUS_VERSION" ]; then
+            echo "kubectl version did not change; no tag required."
+            echo "should_tag=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          TAG="infra-${CURRENT_VERSION}"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists; no tag required."
+            echo "should_tag=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "should_tag=true" >> "$GITHUB_OUTPUT"
+
       - name: Create tag
+        if: steps.tagger.outputs.should_tag == 'true'
         run: |
-          git config --global user.name "GitOps"
-          git config --global user.email "gitops@ci"
+          git config user.name "GitOps"
+          git config user.email "gitops@ci"
           git tag "${{ steps.tagger.outputs.tag }}"
           git push origin "${{ steps.tagger.outputs.tag }}"
