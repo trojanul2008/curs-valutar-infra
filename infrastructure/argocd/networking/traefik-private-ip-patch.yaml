@@ -1,3 +1,4 @@
 spec:
+  externalTrafficPolicy: Local
   externalIPs:
     - 192.168.1.68
