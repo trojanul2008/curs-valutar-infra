@@ -55,5 +55,3 @@ spec:
               memory: "128Mi"
               cpu: "200m"
               ephemeral-storage: "200Mi"
-          imagePullSecrets:
-            - name: docker-credentials
