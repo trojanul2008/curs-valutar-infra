@@ -6,3 +6,5 @@ resources:
   - ingress.yaml
   - network-policy.yaml
   - pod-disruption-budget.yaml  # Added PDB
+
+# Argo CD shared-base webhook test
