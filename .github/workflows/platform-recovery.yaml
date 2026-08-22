@@ -74,6 +74,7 @@ jobs:
           ./scripts/install/install-helm.sh
           ./scripts/install/install-kubectl.sh
           ./scripts/install/install-kustomize.sh
+          ./scripts/install/install-cloudflared-access.sh
 
       - name: Restore kubeconfig
         env:
@@ -95,6 +96,16 @@ jobs:
 
           chmod 600 "$HOME/.kube/config"
 
+      - name: Start Kubernetes Access tunnel
+        env:
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ./scripts/access/start-k8s-api-proxy.sh
+
       - name: Run platform recovery
         shell: bash
         run: |
@@ -115,6 +126,11 @@ jobs:
             echo ""
             echo "No recovery secret values are written to this summary."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stop Kubernetes Access tunnel
+        if: always()
+        shell: bash
+        run: ./scripts/access/stop-k8s-api-proxy.sh
 
       - name: Remove kubeconfig
         if: always()
