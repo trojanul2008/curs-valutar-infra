@@ -4,6 +4,7 @@ metadata:
   name: curs-valutar-dev-autoupdate
   namespace: flux-system
 spec:
+  suspend: true
   interval: 5m
   sourceRef:
     kind: GitRepository
