@@ -12,6 +12,8 @@ REQUIRED_SETS=(
   "trivy"
   "kubeconform"
   "flux"
+  "argocdApp"
+  "certManagerApp"
   "kyverno,kyvernoApp"       # accept 'kyverno' or 'kyvernoApp'
   "traefik,traefikApp"       # accept 'traefik' or 'traefikApp'
 )
@@ -21,7 +23,7 @@ echo "🔎 Validating $VERSIONS_FILE…"
 
 missing=0; badfmt=0
 
-has_key() { yq -e "has(\"$1\")" "$VERSIONS_FILE" >/dev/null; }
+has_key() { yq -e "has(\"$1\")" "$VERSIONS_FILE" >/dev/null 2>&1; }
 
 for set in "${REQUIRED_SETS[@]}"; do
   IFS=',' read -r k1 k2 <<< "$set"

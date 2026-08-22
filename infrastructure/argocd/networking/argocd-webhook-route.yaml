@@ -1,0 +1,38 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: argocd-webhook-rate-limit
+  namespace: argocd
+spec:
+  rateLimit:
+    average: 5
+    period: 1s
+    burst: 10
+---
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: argocd-webhook-https
+  namespace: argocd
+spec:
+  serverName: argocd.istartit.com
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: argocd-webhook
+  namespace: argocd
+spec:
+  entryPoints:
+    - web
+
+  routes:
+    - kind: Rule
+      match: Host(`argocd-webhook.istartit.com`) && Path(`/api/webhook`) && Method(`POST`)
+      middlewares:
+        - name: argocd-webhook-rate-limit
+      services:
+        - name: argocd-server
+          port: 443
+          scheme: https
+          serversTransport: argocd-webhook-https

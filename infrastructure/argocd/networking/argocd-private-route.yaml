@@ -1,0 +1,30 @@
+apiVersion: traefik.io/v1alpha1
+kind: MiddlewareTCP
+metadata:
+  name: argocd-ip-allowlist
+  namespace: argocd
+spec:
+  ipAllowList:
+    sourceRange:
+      - 192.168.1.193/32
+      - 192.168.1.58/32
+      - 192.168.2.2/32
+      - 192.168.2.1/32
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRouteTCP
+metadata:
+  name: argocd-server-private
+  namespace: argocd
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: HostSNI(`argocd.istartit.com`)
+      middlewares:
+        - name: argocd-ip-allowlist
+      services:
+        - name: argocd-server
+          port: 443
+  tls:
+    passthrough: true

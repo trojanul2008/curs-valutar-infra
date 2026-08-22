@@ -1,0 +1,24 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: curs-valutar-prod
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/manifest-generate-paths: ".;../../base"
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/trojanul2008/curs-valutar-infra.git
+    targetRevision: refs/heads/prod
+    path: infrastructure/k8s/overlays/prod
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
