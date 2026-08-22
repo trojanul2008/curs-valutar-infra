@@ -145,7 +145,14 @@ jobs:
 
           # Optional: Checkov config scan
           # Run checkov and always produce JSON output; do not let checkov exit-code break the job
-          checkov -f manifest-${{ matrix.overlay }}.yaml -o json > checkov-${{ matrix.overlay }}.json || true
+          # CKV_K8S_43 intentionally skipped:
+          # image tags are currently part of the GitOps promotion model.
+          # Digest pinning will be introduced with dedicated image automation.
+          checkov \
+            -f manifest-${{ matrix.overlay }}.yaml \
+            -o json \
+            --skip-check CKV_K8S_43 \
+            > checkov-${{ matrix.overlay }}.json || true
 
           # Ensure we have some JSON output from checkov
           if [ ! -s checkov-${{ matrix.overlay }}.json ]; then
