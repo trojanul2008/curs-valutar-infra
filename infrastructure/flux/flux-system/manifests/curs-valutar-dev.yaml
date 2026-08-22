@@ -7,6 +7,7 @@ spec:
   interval: 5m
   path: infrastructure/k8s/overlays/dev
   prune: false
+  deletionPolicy: Orphan
   suspend: true
   sourceRef:
     kind: GitRepository
