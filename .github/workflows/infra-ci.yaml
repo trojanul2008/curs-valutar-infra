@@ -3,24 +3,31 @@ name: "🚦 Infrastructure CI"
 on:
   pull_request:
     branches:
-      - dev
+      - main
   push:
     branches:
-      - dev
+      - main
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: infra-ci-${{ github.ref }}
+  group: infra-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  validate-dev:
-    name: "Validate DEV desired state"
+  validate:
+    name: "Validate ${{ matrix.environment }} desired state"
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        environment:
+          - dev
+          - prod
 
     steps:
       - name: Checkout repository
@@ -37,54 +44,61 @@ jobs:
             -print0 \
             | xargs -0 yamllint -c .yamllint.yml
 
-      - name: Render DEV manifests
+      - name: Render Kubernetes manifests
         run: |
           mkdir -p artifacts
 
-          kustomize build infrastructure/k8s/overlays/dev \
-            > artifacts/manifest-dev.yaml
+          kustomize build \
+            "infrastructure/k8s/overlays/${{ matrix.environment }}" \
+            > "artifacts/manifest-${{ matrix.environment }}.yaml"
 
-          test -s artifacts/manifest-dev.yaml
+          test -s "artifacts/manifest-${{ matrix.environment }}.yaml"
 
           echo "Rendered resources:"
-          grep '^kind:' artifacts/manifest-dev.yaml || true
+          grep '^kind:' \
+            "artifacts/manifest-${{ matrix.environment }}.yaml" \
+            || true
 
       - name: Validate Kubernetes schemas
         run: |
           kubeconform \
             -strict \
             -summary \
-            artifacts/manifest-dev.yaml
+            "artifacts/manifest-${{ matrix.environment }}.yaml"
 
       - name: Validate Kyverno policies
         run: |
           kyverno apply infrastructure/kyverno \
-            --resource artifacts/manifest-dev.yaml \
+            --resource "artifacts/manifest-${{ matrix.environment }}.yaml" \
             --policy-report \
-            | tee artifacts/kyverno-dev.log
+            | tee "artifacts/kyverno-${{ matrix.environment }}.log"
 
       - name: Validate Checkov policies
         shell: bash
         run: |
           set +e
 
+          # CKV_K8S_43 is temporarily skipped because the application
+          # image migration to immutable digest references is handled
+          # separately from this repository-topology migration.
           checkov \
-            -f artifacts/manifest-dev.yaml \
+            -f "artifacts/manifest-${{ matrix.environment }}.yaml" \
             --framework kubernetes \
             --skip-check CKV_K8S_43 \
             -o json \
-            > artifacts/checkov-dev.json
+            > "artifacts/checkov-${{ matrix.environment }}.json"
 
           RC=$?
 
           set -e
 
           echo "Checkov summary:"
+
           jq '{
             passed: (.results.passed_checks | length),
             failed: (.results.failed_checks | length),
             skipped: (.results.skipped_checks | length)
-          }' artifacts/checkov-dev.json
+          }' "artifacts/checkov-${{ matrix.environment }}.json"
 
           if [[ "$RC" -ne 0 ]]; then
             echo
@@ -93,7 +107,7 @@ jobs:
             jq -r '
               .results.failed_checks[]? |
               "\(.check_id) | \(.check_name) | \(.resource)"
-            ' artifacts/checkov-dev.json
+            ' "artifacts/checkov-${{ matrix.environment }}.json"
 
             exit "$RC"
           fi
@@ -103,8 +117,8 @@ jobs:
           trivy config \
             --severity MEDIUM,HIGH,CRITICAL \
             --exit-code 0 \
-            artifacts/manifest-dev.yaml \
-            | tee artifacts/trivy-config-dev.txt
+            "artifacts/manifest-${{ matrix.environment }}.yaml" \
+            | tee "artifacts/trivy-config-${{ matrix.environment }}.txt"
 
       - name: Trivy image vulnerability report
         shell: bash
@@ -113,7 +127,7 @@ jobs:
 
           mapfile -t IMAGES < <(
             yq -r '.. | .image? | select(.)' \
-              artifacts/manifest-dev.yaml \
+              "artifacts/manifest-${{ matrix.environment }}.yaml" \
               | sort -u
           )
 
@@ -144,12 +158,14 @@ jobs:
         shell: bash
         run: |
           {
-            echo "## DEV infrastructure validation"
+            echo "## ${{ matrix.environment }} infrastructure validation"
             echo
 
-            if [[ -f artifacts/checkov-dev.json ]]; then
-              PASSED="$(jq '.results.passed_checks | length' artifacts/checkov-dev.json)"
-              FAILED="$(jq '.results.failed_checks | length' artifacts/checkov-dev.json)"
+            FILE="artifacts/checkov-${{ matrix.environment }}.json"
+
+            if [[ -f "$FILE" ]]; then
+              PASSED="$(jq '.results.passed_checks | length' "$FILE")"
+              FAILED="$(jq '.results.failed_checks | length' "$FILE")"
 
               echo "### Checkov"
               echo "- Passed: $PASSED"
@@ -165,7 +181,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: infrastructure-ci-dev
+          name: infrastructure-ci-${{ matrix.environment }}
           path: artifacts/
           retention-days: 14
           if-no-files-found: warn

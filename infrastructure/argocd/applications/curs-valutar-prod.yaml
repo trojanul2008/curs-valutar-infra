@@ -10,7 +10,7 @@ spec:
 
   source:
     repoURL: https://github.com/trojanul2008/curs-valutar-infra.git
-    targetRevision: refs/heads/prod
+    targetRevision: refs/heads/main
     path: infrastructure/k8s/overlays/prod
 
   destination:

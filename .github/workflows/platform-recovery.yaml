@@ -52,8 +52,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "$REF_NAME" != "dev" ]]; then
-            echo "ERROR: Platform Recovery must be run from the dev branch."
+          if [[ "$REF_NAME" != "main" ]]; then
+            echo "ERROR: Platform Recovery must be run from the main branch."
             exit 1
           fi
 
