@@ -25,6 +25,11 @@ echo "Applying private Argo CD route..."
 kubectl apply \
   -f infrastructure/argocd/networking/argocd-private-route.yaml
 
+echo "Applying public Argo CD GitHub webhook route..."
+
+kubectl apply \
+  -f infrastructure/argocd/networking/argocd-webhook-route.yaml
+
 echo "Applying Argo CD applications..."
 
 kubectl apply \
@@ -42,6 +47,7 @@ fi
 
 echo "Applying Argo CD TLS certificate configuration..."
 
-kubectl apply   -f infrastructure/argocd/certificates/argocd-certificate.yaml
+kubectl apply \
+  -f infrastructure/argocd/certificates/argocd-certificate.yaml
 
 echo "Argo CD configuration applied successfully."
