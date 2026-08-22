@@ -1,0 +1,27 @@
+data:
+  resource.customizations.health.networking.k8s.io_Ingress: |
+    hs = {}
+
+    if obj.spec ~= nil and obj.spec.ingressClassName == "traefik" then
+      hs.status = "Healthy"
+      hs.message = "Traefik NodePort ingress; loadBalancer status is not used in this cluster"
+      return hs
+    end
+
+    if obj.status ~= nil
+      and obj.status.loadBalancer ~= nil
+      and obj.status.loadBalancer.ingress ~= nil then
+
+      for _, ingress in ipairs(obj.status.loadBalancer.ingress) do
+        if ingress.ip ~= nil or ingress.hostname ~= nil then
+          hs.status = "Healthy"
+          hs.message = "Ingress has a load balancer address"
+          return hs
+        end
+      end
+    end
+
+    hs.status = "Progressing"
+    hs.message = "Waiting for load balancer address"
+    return hs
+  webhook.maxPayloadSizeMB: "2"

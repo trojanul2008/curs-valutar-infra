@@ -17,3 +17,5 @@ KUBECTL_CONTEXT: remote-cloudflare
 
 checkov: 3.3.13
 yamllint: 1.38.0
+argocdApp: 3.5.0
+certManagerApp: 1.20.3
