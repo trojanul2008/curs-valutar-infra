@@ -92,14 +92,18 @@ verify_safe_flux_composition() {
     infrastructure/flux/flux-system \
     > "$rendered"
 
-  if grep -Eq 'curs-valutar|infra-dev' "$rendered"; then
+  local legacy_name_pattern
+
+  legacy_name_pattern='^[[:space:]]*name:[[:space:]]*(curs-valutar-dev|curs-valutar-prod|curs-valutar-repo|curs-valutar-dev-policy|curs-valutar-prod-policy|curs-valutar-dev-autoupdate|curs-valutar-autoupdate|infra-dev|infra-prod)[[:space:]]*$'
+
+  if grep -Eq "$legacy_name_pattern" "$rendered"; then
     rm -f "$rendered"
     fail "Recovery Flux composition contains legacy curs-valutar ownership."
   fi
 
   rm -f "$rendered"
 
-  log "Flux recovery composition contains no curs-valutar or infra-dev resources."
+  log "Flux recovery composition contains no curs-valutar, infra-dev, or infra-prod resources."
 }
 
 preflight() {
@@ -174,10 +178,24 @@ install_flux_platform() {
 
   log "Flux controllers are ready."
 
-  log "Installing/reconciling External Secrets through Flux."
+  log "Restoring the canonical Flux Git source of truth."
 
   k apply \
-    -f infrastructure/flux/flux-system/manifests/external-secrets-install.yaml
+    -f infrastructure/flux/flux-system/manifests/flux-system-sync.yaml
+
+  k -n flux-system wait \
+    --for=condition=ready \
+    gitrepository/flux-system \
+    --timeout=180s
+
+  k -n flux-system wait \
+    --for=condition=ready \
+    kustomization/flux-system \
+    --timeout=300s
+
+  log "Flux root reconciliation is ready."
+
+  log "Waiting for External Secrets managed by Flux."
 
   k -n flux-system wait \
     --for=condition=ready \

@@ -1,12 +1,7 @@
 name: "✅ DEV Deployment Verification"
 
 on:
-  push:
-    branches:
-      - dev
-    paths:
-      - "infrastructure/k8s/base/**"
-      - "infrastructure/k8s/overlays/dev/**"
+  workflow_dispatch:
 
 permissions:
   contents: read

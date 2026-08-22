@@ -7,4 +7,5 @@ kind: Kustomization
 
 resources:
   - manifests/flux-controllers.yaml
+  - manifests/flux-system-sync.yaml
   - manifests/external-secrets-install.yaml
