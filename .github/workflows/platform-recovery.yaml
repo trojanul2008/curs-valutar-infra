@@ -1,0 +1,123 @@
+name: "🛟 Platform Recovery"
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Precheck only or perform recovery"
+        required: true
+        default: precheck
+        type: choice
+        options:
+          - precheck
+          - recover
+      confirm:
+        description: "Type RECOVER when mode=recover"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-recovery
+  cancel-in-progress: false
+
+jobs:
+  platform-recovery:
+    name: Kubernetes Platform Recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    env:
+      RECOVERY_MODE: ${{ inputs.mode }}
+      RECOVERY_CONFIRMATION: ${{ inputs.confirm }}
+      KUBE_CONTEXT: remote-cloudflare
+      EXPECTED_NODE: raspberrypi
+
+      ISTARTIT_GIT_USERNAME: ${{ secrets.ISTARTIT_GIT_USERNAME }}
+      ISTARTIT_GIT_PASSWORD: ${{ secrets.ISTARTIT_GIT_PASSWORD }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      ARGO_GITHUB_WEBHOOK_SECRET: ${{ secrets.ARGO_GITHUB_WEBHOOK_SECRET }}
+
+    steps:
+      - name: Checkout trusted recovery source
+        uses: actions/checkout@v7
+
+      - name: Validate recovery invocation
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$REF_NAME" != "dev" ]]; then
+            echo "ERROR: Platform Recovery must be run from the dev branch."
+            exit 1
+          fi
+
+          if [[ "$RECOVERY_MODE" == "recover" \
+             && "$RECOVERY_CONFIRMATION" != "RECOVER" ]]; then
+            echo "ERROR: Recovery requires confirmation text RECOVER."
+            exit 1
+          fi
+
+          echo "Recovery invocation is valid."
+          echo "mode=$RECOVERY_MODE"
+
+      - name: Install recovery CLI tools
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ./scripts/install/install-helm.sh
+          ./scripts/install/install-kubectl.sh
+          ./scripts/install/install-kustomize.sh
+
+      - name: Restore kubeconfig
+        env:
+          KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$KUBE_CONFIG_DATA" ]]; then
+            echo "ERROR: KUBE_CONFIG_DATA is not configured."
+            exit 1
+          fi
+
+          mkdir -p "$HOME/.kube"
+
+          printf '%s' "$KUBE_CONFIG_DATA" \
+            | base64 --decode \
+            > "$HOME/.kube/config"
+
+          chmod 600 "$HOME/.kube/config"
+
+      - name: Run platform recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ./scripts/recovery/recover-platform.sh "$RECOVERY_MODE"
+
+      - name: Recovery summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Platform Recovery"
+            echo ""
+            echo "- Mode: \`${RECOVERY_MODE}\`"
+            echo "- Source branch: \`${GITHUB_REF_NAME}\`"
+            echo "- Cluster context: \`${KUBE_CONTEXT}\`"
+            echo ""
+            echo "No recovery secret values are written to this summary."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove kubeconfig
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$HOME/.kube/config"
