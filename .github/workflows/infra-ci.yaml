@@ -67,7 +67,7 @@ jobs:
           set -euo pipefail
           set -x
           bash scripts/install/install-all.sh
-          
+
       - name: Add user-local bin to PATH
         run: echo "$HOME/.local/bin" >> $GITHUB_PATH
 
@@ -199,28 +199,34 @@ jobs:
                   scan-results/trivy-images/image-${{ matrix.overlay }}*.json >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: 📊 Drift Detection (Parallel)
+      - name: 📊 Argo CD Sync & Health Check
         run: |
           set -euo pipefail
-          set -x
           mkdir -p ~/.kube
           echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > ~/.kube/config
 
-          flux --context="remote-cloudflare" diff kustomization curs-valutar-${{ matrix.overlay }} \
-            --path infrastructure/k8s/overlays/${{ matrix.overlay }} \
-            > drift-flux-${{ matrix.overlay }}.txt &
+          APP="curs-valutar-${{ matrix.overlay }}"
 
-          kubectl --context=remote-cloudflare diff -k infrastructure/k8s/overlays/${{ matrix.overlay }} \
-            > drift-kubectl-${{ matrix.overlay }}.txt &
+          for i in $(seq 1 30); do
+            SYNC="$(kubectl --context=remote-cloudflare -n argocd get application "$APP" -o jsonpath='{.status.sync.status}' 2>/dev/null || true)"
+            HEALTH="$(kubectl --context=remote-cloudflare -n argocd get application "$APP" -o jsonpath='{.status.health.status}' 2>/dev/null || true)"
+            REVISION="$(kubectl --context=remote-cloudflare -n argocd get application "$APP" -o jsonpath='{.status.sync.revision}' 2>/dev/null || true)"
 
-          wait
+            echo "$APP sync=$SYNC health=$HEALTH revision=$REVISION"
 
-          if grep -qE '^[-+]' drift-kubectl-${{ matrix.overlay }}.txt; then
-            echo "❌ kubectl diff shows resource drift"
-            exit 1
-          else
-            echo "✅ No resource drift detected"
-          fi
+            if [[ "$SYNC" == "Synced" && "$HEALTH" == "Healthy" ]]; then
+              echo "✅ $APP is Synced and Healthy"
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          echo "❌ $APP is not Synced and Healthy"
+
+          kubectl --context=remote-cloudflare             -n argocd             get application "$APP"
+
+          exit 1
 
       - name: 📎 Upload All Artifacts
         uses: actions/upload-artifact@v4
@@ -236,8 +242,6 @@ jobs:
             scan-results/vulnerability-details-${{ matrix.overlay }}.txt
             trivy-scan-*.json
             scan-results/trivy-config-${{ matrix.overlay }}.txt
-            drift-flux-${{ matrix.overlay }}.txt
-            drift-kubectl-${{ matrix.overlay }}.txt
             # Optional
             checkov-${{ matrix.overlay }}.json
 
