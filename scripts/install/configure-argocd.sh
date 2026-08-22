@@ -35,6 +35,9 @@ echo "Applying Argo CD applications..."
 kubectl apply \
   -f infrastructure/argocd/applications/curs-valutar-dev.yaml
 
+kubectl apply \
+  -f infrastructure/argocd/applications/curs-valutar-prod.yaml
+
 echo "Checking cert-manager and Cloudflare credential..."
 
 kubectl get crd certificates.cert-manager.io >/dev/null

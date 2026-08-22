@@ -4,6 +4,7 @@ metadata:
   name: curs-valutar-prod
   namespace: flux-system
 spec:
+  suspend: true
   interval: 5m
   path: infrastructure/k8s/overlays/prod
   prune: true
