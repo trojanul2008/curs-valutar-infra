@@ -1,4 +1,4 @@
-name: "✅ DEV Deployment Verification"
+name: "✅ PROD Deployment Verification"
 
 on:
   push:
@@ -6,18 +6,18 @@ on:
       - main
     paths:
       - "infrastructure/k8s/base/**"
-      - "infrastructure/k8s/overlays/dev/**"
+      - "infrastructure/k8s/overlays/prod/**"
 
 permissions:
   contents: read
 
 concurrency:
-  group: dev-deployment
+  group: prod-deployment
   cancel-in-progress: true
 
 jobs:
   verify:
-    name: "Verify Argo CD DEV deployment"
+    name: "Verify Argo CD PROD deployment"
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -67,7 +67,7 @@ jobs:
         shell: bash
         run: |
           EXPECTED_REVISION="${GITHUB_SHA}"
-          APP="curs-valutar-dev"
+          APP="curs-valutar-prod"
 
           echo "Expected Git revision: $EXPECTED_REVISION"
 
@@ -102,14 +102,14 @@ jobs:
             if [[ "$REVISION" == "$EXPECTED_REVISION" \
                && "$SYNC" == "Synced" \
                && "$HEALTH" == "Healthy" ]]; then
-              echo "Argo CD deployed the expected DEV revision."
+              echo "Argo CD deployed the expected PROD revision."
               exit 0
             fi
 
             sleep 2
           done
 
-          echo "DEV deployment did not reach the expected state."
+          echo "PROD deployment did not reach the expected state."
 
           kubectl \
             --context=remote-cloudflare \
@@ -118,7 +118,7 @@ jobs:
 
           exit 1
 
-      - name: DEV HTTP smoke test
+      - name: PROD HTTP smoke test
         run: |
           curl \
             --fail \
@@ -126,10 +126,10 @@ jobs:
             --show-error \
             --retry 5 \
             --retry-delay 2 \
-            https://di-exchange.istartit.com \
+            https://exchange.istartit.com \
             > /dev/null
 
-          echo "DEV HTTP smoke test passed."
+          echo "PROD HTTP smoke test passed."
 
       - name: Stop Kubernetes Access tunnel
         if: always()
