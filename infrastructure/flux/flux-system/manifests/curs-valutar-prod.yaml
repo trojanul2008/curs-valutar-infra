@@ -7,7 +7,8 @@ spec:
   suspend: true
   interval: 5m
   path: infrastructure/k8s/overlays/prod
-  prune: true
+  prune: false
+  deletionPolicy: Orphan
   sourceRef:
     kind: GitRepository
     name: infra-prod
