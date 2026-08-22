@@ -1,10 +1,17 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
+
 source ./scripts/utils/load-version.sh
 
-CHART_VERSION=$(get_version kyvernoChart)  # e.g., 3.2.7
-APP_VERSION=$(get_version kyvernoApp)      # optional
+CHART_VERSION="$(get_version kyvernoChart)"
 NAMESPACE="kyverno"
+
+if [[ -z "$CHART_VERSION" || "$CHART_VERSION" == "null" ]]; then
+  echo "ERROR: kyvernoChart version is missing from .github/versions.yaml"
+  exit 1
+fi
+
+echo "Installing Kyverno chart ${CHART_VERSION}..."
 
 helm repo add kyverno https://kyverno.github.io/kyverno/
 helm repo update
@@ -13,9 +20,8 @@ helm upgrade --install kyverno kyverno/kyverno \
   --namespace "$NAMESPACE" \
   --create-namespace \
   --version "$CHART_VERSION" \
-  --set installCRDs=true \
-  ${APP_VERSION:+--set image.tag="$APP_VERSION"} \
-  --wait --timeout 10m
+  --set crds.install=true \
+  --wait \
+  --timeout 10m
 
-echo "✅ Kyverno chart ${CHART_VERSION} installed in namespace ${NAMESPACE}"
-
+echo "Kyverno chart ${CHART_VERSION} installed successfully."
