@@ -1,0 +1,107 @@
+name: "✅ DEV Deployment Verification"
+
+on:
+  push:
+    branches:
+      - dev
+    paths:
+      - "infrastructure/k8s/base/**"
+      - "infrastructure/k8s/overlays/dev/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-deployment
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: "Verify Argo CD DEV deployment"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install kubectl
+        run: scripts/install/install-kubectl.sh
+
+      - name: Restore Kubernetes access
+        run: |
+          mkdir -p ~/.kube
+
+          echo "${{ secrets.KUBE_CONFIG_DATA }}" \
+            | base64 --decode \
+            > ~/.kube/config
+
+          chmod 600 ~/.kube/config
+
+      - name: Wait for Argo CD deployment
+        shell: bash
+        run: |
+          EXPECTED_REVISION="${GITHUB_SHA}"
+          APP="curs-valutar-dev"
+
+          echo "Expected Git revision: $EXPECTED_REVISION"
+
+          for i in $(seq 1 60); do
+            REVISION="$(
+              kubectl \
+                --context=remote-cloudflare \
+                -n argocd \
+                get application "$APP" \
+                -o jsonpath='{.status.sync.revision}' 2>/dev/null || true
+            )"
+
+            SYNC="$(
+              kubectl \
+                --context=remote-cloudflare \
+                -n argocd \
+                get application "$APP" \
+                -o jsonpath='{.status.sync.status}' 2>/dev/null || true
+            )"
+
+            HEALTH="$(
+              kubectl \
+                --context=remote-cloudflare \
+                -n argocd \
+                get application "$APP" \
+                -o jsonpath='{.status.health.status}' 2>/dev/null || true
+            )"
+
+            echo \
+              "revision=$REVISION sync=$SYNC health=$HEALTH"
+
+            if [[ "$REVISION" == "$EXPECTED_REVISION" \
+               && "$SYNC" == "Synced" \
+               && "$HEALTH" == "Healthy" ]]; then
+              echo "Argo CD deployed the expected DEV revision."
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          echo "DEV deployment did not reach the expected state."
+
+          kubectl \
+            --context=remote-cloudflare \
+            -n argocd \
+            get application "$APP"
+
+          exit 1
+
+      - name: DEV HTTP smoke test
+        run: |
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --retry 5 \
+            --retry-delay 2 \
+            https://di-exchange.istartit.com \
+            > /dev/null
+
+          echo "DEV HTTP smoke test passed."
