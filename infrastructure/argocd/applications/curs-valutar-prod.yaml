@@ -4,7 +4,7 @@ metadata:
   name: curs-valutar-prod
   namespace: argocd
   annotations:
-    argocd.argoproj.io/manifest-generate-paths: .
+    argocd.argoproj.io/manifest-generate-paths: ".;../../base"
 spec:
   project: default
 
