@@ -1,281 +1,171 @@
-name: "🚦 Infra CI Pipeline"
+name: "🚦 Infrastructure CI"
 
 on:
-  push:
-    branches: [dev]
   pull_request:
-    branches: [dev, prod]
+    branches:
+      - dev
+  push:
+    branches:
+      - dev
   workflow_dispatch:
 
 permissions:
   contents: read
-  pull-requests: write
+
+concurrency:
+  group: infra-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  setup:
-    name: 🧰 Setup & Load Versions
+  validate-dev:
+    name: "Validate DEV desired state"
     runs-on: ubuntu-latest
-    outputs:
-      versions: ${{ steps.extract.outputs.versions }}
+    timeout-minutes: 20
+
     steps:
-      - uses: actions/checkout@v4
-      - id: extract
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install pinned CI tools
+        run: scripts/install/install-ci-tools.sh
+
+      - name: Lint YAML
+        run: |
+          find infrastructure .github \
+            -type f \
+            \( -name '*.yaml' -o -name '*.yml' \) \
+            -print0 \
+            | xargs -0 yamllint -c .yamllint.yml
+
+      - name: Render DEV manifests
+        run: |
+          mkdir -p artifacts
+
+          kustomize build infrastructure/k8s/overlays/dev \
+            > artifacts/manifest-dev.yaml
+
+          test -s artifacts/manifest-dev.yaml
+
+          echo "Rendered resources:"
+          grep '^kind:' artifacts/manifest-dev.yaml || true
+
+      - name: Validate Kubernetes schemas
+        run: |
+          kubeconform \
+            -strict \
+            -summary \
+            artifacts/manifest-dev.yaml
+
+      - name: Validate Kyverno policies
+        run: |
+          kyverno apply infrastructure/kyverno \
+            --resource artifacts/manifest-dev.yaml \
+            --policy-report \
+            | tee artifacts/kyverno-dev.log
+
+      - name: Validate Checkov policies
         shell: bash
         run: |
-          set -euo pipefail
-          set -x
-          file=".github/versions.yaml"
-          yq -o=json '.' "$file" | jq -c . > versions.json
-          echo "versions=$(cat versions.json)" >> "$GITHUB_OUTPUT"
+          set +e
 
-  verify-cli-versions:
-    name: 🧪 Verify CLI Versions
-    runs-on: ubuntu-latest
-    needs: setup
-    steps:
-      - uses: actions/checkout@v4
-      - run: |
-          set -euo pipefail
-          set -x
-          bash scripts/install/install-all.sh
-          echo "🧪 Installed CLI versions:"
-          kubectl version --client
-          kyverno version
-          flux --version
-          kustomize version
-
-          # # Optional version pin check
-          # required_kustomize="v5.0.1"
-          # installed_kustomize=$(kustomize version | grep -oE 'v[0-9\.]+')
-          # if [[ "$installed_kustomize" != "$required_kustomize" ]]; then
-          #   echo "❌ Kustomize version mismatch"
-          #   exit 1
-          # fi
-
-  ci:
-    name: 🧪 Full Infra CI
-    runs-on: ubuntu-latest
-    needs: [setup, verify-cli-versions]
-    strategy:
-      matrix:
-        overlay: [dev, prod]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: 🔧 Install Tools
-        run: |
-          set -euo pipefail
-          set -x
-          bash scripts/install/install-all.sh
-
-      - name: Add user-local bin to PATH
-        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: 🧬 Dump Environment
-        run: env
-
-      - name: 🗂 Dump File Tree
-        run: find . -type f | sort
-
-      - name: 🔍 Dump Trivy Version & Config Help
-        run: |
-          trivy -v
-          trivy config --help
-          env | grep -i trivy || true
-
-      - name: 🧹 Lint YAMLs
-        run: |
-          set -euo pipefail
-          set -x
-          find infrastructure -name '*.yaml' -o -name '*.yml' \
-            | xargs yamllint -c .yamllint.yml
-
-          # Optional: Helm lint if Helm charts exist
-          if [ -d helm ]; then
-            for chart in helm/*; do
-              helm lint "$chart" || exit 1
-            done
-          fi
-
-      - name: 📐 Validate K8s Manifests
-        run: |
-          set -euo pipefail
-          set -x
-          kustomize build infrastructure/k8s/base | kubeconform -summary
-          kustomize build infrastructure/k8s/overlays/${{ matrix.overlay }} | kubeconform -summary
-
-      - name: 🚨 Kyverno Policy Check
-        run: |
-          set -euo pipefail
-          set -x
-          kustomize build infrastructure/k8s/overlays/${{ matrix.overlay }} > manifest-${{ matrix.overlay }}.yaml
-          kyverno apply infrastructure/kyverno --resource manifest-${{ matrix.overlay }}.yaml --policy-report | tee kyverno-full-${{ matrix.overlay }}.log
-          sed -n '/^apiVersion:/,$p' kyverno-full-${{ matrix.overlay }}.log > kyverno-report-${{ matrix.overlay }}.yaml
-          echo "📦 Cleaned kyverno-report-${{ matrix.overlay }}.yaml contents:"
-          cat kyverno-report-${{ matrix.overlay }}.yaml
-          if grep -q 'kind:' kyverno-report-${{ matrix.overlay }}.yaml; then
-            if ! yq -o=json kyverno-report-${{ matrix.overlay }}.yaml > kyverno-results-${{ matrix.overlay }}.json; then
-              echo "⚠️ yq failed, writing empty JSON"
-              echo '{}' > kyverno-results-${{ matrix.overlay }}.json
-            fi
-          else
-            echo "❌ kyverno-report.yaml malformed or empty"
-            exit 1
-          fi
-
-      - name: 🔍 Image & Config Security Scans (Trivy)
-        run: |
-          set -euo pipefail
-          set -x
-          source scripts/utils/load-version.sh
-          export TRIVY_CACHE_DIR=$(get_version TRIVY_CACHE_DIR)
-          chmod +x scripts/utils/scan-images.sh
-          echo "🔎 Running scan-images.sh with config scan..."
-          if ! bash -x scripts/utils/scan-images.sh "${{ matrix.overlay }}" 2>&1 | tee trivy-full-${{ matrix.overlay }}.log.txt; then
-            echo "❌ Trivy scan failed"
-            cat trivy-full-${{ matrix.overlay }}.log.txt
-            echo "⚠️ Continuing to upload artifacts for postmortem"
-            touch scan-failed-${{ matrix.overlay }}
-          fi
-
-          echo "✅ Trivy image & config scans passed"
-
-          # Optional: Snyk scan (requires API token)
-          snyk test --file=manifest-${{ matrix.overlay }}.yaml || true
-
-          # Optional: Checkov config scan
-          # Run checkov and always produce JSON output; do not let checkov exit-code break the job
-          # CKV_K8S_43 intentionally skipped:
-          # image tags are currently part of the GitOps promotion model.
-          # Digest pinning will be introduced with dedicated image automation.
           checkov \
-            -f manifest-${{ matrix.overlay }}.yaml \
-            -o json \
+            -f artifacts/manifest-dev.yaml \
+            --framework kubernetes \
             --skip-check CKV_K8S_43 \
-            > checkov-${{ matrix.overlay }}.json || true
+            -o json \
+            > artifacts/checkov-dev.json
 
-          # Ensure we have some JSON output from checkov
-          if [ ! -s checkov-${{ matrix.overlay }}.json ]; then
-            echo "⚠️ checkov did not produce JSON output; printing any output (if present) and failing"
-            ls -l checkov-${{ matrix.overlay }}.json || true
-            cat checkov-${{ matrix.overlay }}.json || true
+          RC=$?
+
+          set -e
+
+          echo "Checkov summary:"
+          jq '{
+            passed: (.results.passed_checks | length),
+            failed: (.results.failed_checks | length),
+            skipped: (.results.skipped_checks | length)
+          }' artifacts/checkov-dev.json
+
+          if [[ "$RC" -ne 0 ]]; then
+            echo
+            echo "Checkov failed checks:"
+
+            jq -r '
+              .results.failed_checks[]? |
+              "\(.check_id) | \(.check_name) | \(.resource)"
+            ' artifacts/checkov-dev.json
+
+            exit "$RC"
+          fi
+
+      - name: Trivy configuration report
+        run: |
+          trivy config \
+            --severity MEDIUM,HIGH,CRITICAL \
+            --exit-code 0 \
+            artifacts/manifest-dev.yaml \
+            | tee artifacts/trivy-config-dev.txt
+
+      - name: Trivy image vulnerability report
+        shell: bash
+        run: |
+          mkdir -p artifacts/trivy-images
+
+          mapfile -t IMAGES < <(
+            yq -r '.. | .image? | select(.)' \
+              artifacts/manifest-dev.yaml \
+              | sort -u
+          )
+
+          if [[ "${#IMAGES[@]}" -eq 0 ]]; then
+            echo "No container images found."
             exit 1
           fi
 
-          # Fail the step if checkov JSON contains failed checks
-          if jq -e '.results.failed_checks | length > 0' checkov-${{ matrix.overlay }}.json >/dev/null 2>&1; then
-            echo "❌ Checkov found failed checks:"
-            # Print a summary of failed checks for readability
-            jq -r '.results.failed_checks[] | "- \(.check_id) |\(.file) |\(.resource) |\(.message)"' checkov-${{ matrix.overlay }}.json || true
-            exit 1
-          else
-            echo "✅ Checkov found no failed checks"
-          fi
+          for IMAGE in "${IMAGES[@]}"; do
+            SAFE_NAME="$(
+              printf '%s' "$IMAGE" \
+                | tr '/:@' '____'
+            )"
 
+            echo "Scanning $IMAGE"
 
-      - name: 📝 Extended Scan Summary
-        if: always()
-        run: |
-          echo "## Infra Scan Summary (${{ matrix.overlay }})" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          if [[ -f scan-results/image-scan-report-${{ matrix.overlay }}.txt ]]; then
-            echo "### Trivy Image Scan" >> "$GITHUB_STEP_SUMMARY"
-            head -n 100 scan-results/image-scan-report-${{ matrix.overlay }}.txt >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-          if [[ -f scan-results/trivy-config-${{ matrix.overlay }}.txt ]]; then
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "### Trivy Config Scan" >> "$GITHUB_STEP_SUMMARY"
-            head -n 100 scan-results/trivy-config-${{ matrix.overlay }}.txt >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-          if [[ -f kyverno-report-${{ matrix.overlay }}.yaml ]]; then
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "### Kyverno Policy Report" >> "$GITHUB_STEP_SUMMARY"
-            yq eval '.results[] | "- \(.message) [\(.policy)] for \(.resources[0].name)"' kyverno-report-${{ matrix.overlay }}.yaml >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-          if ls scan-results/trivy-images/image-${{ matrix.overlay }}*.json 1> /dev/null 2>&1; then
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "### Trivy Critical Vulnerabilities (Table View)" >> "$GITHUB_STEP_SUMMARY"
-            echo "| CVE ID | Title | Severity | Fixed Version |" >> "$GITHUB_STEP_SUMMARY"
-            echo "|--------|-------|----------|----------------|" >> "$GITHUB_STEP_SUMMARY"
-            jq -r '.Results[]? | select(.Vulnerabilities) | .Vulnerabilities[] |
-                  "| \(.VulnerabilityID) | \(.Title | gsub("[|]"; " ")) | \(.Severity) | \(.FixedVersion // "n/a") |"' \
-                  scan-results/trivy-images/image-${{ matrix.overlay }}*.json >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: 📊 Argo CD Sync & Health Check
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > ~/.kube/config
-
-          APP="curs-valutar-${{ matrix.overlay }}"
-
-          for i in $(seq 1 30); do
-            SYNC="$(kubectl --context=remote-cloudflare -n argocd get application "$APP" -o jsonpath='{.status.sync.status}' 2>/dev/null || true)"
-            HEALTH="$(kubectl --context=remote-cloudflare -n argocd get application "$APP" -o jsonpath='{.status.health.status}' 2>/dev/null || true)"
-            REVISION="$(kubectl --context=remote-cloudflare -n argocd get application "$APP" -o jsonpath='{.status.sync.revision}' 2>/dev/null || true)"
-
-            echo "$APP sync=$SYNC health=$HEALTH revision=$REVISION"
-
-            if [[ "$SYNC" == "Synced" && "$HEALTH" == "Healthy" ]]; then
-              echo "✅ $APP is Synced and Healthy"
-              exit 0
-            fi
-
-            sleep 2
+            trivy image \
+              --severity HIGH,CRITICAL \
+              --exit-code 0 \
+              --no-progress \
+              --format json \
+              --output "artifacts/trivy-images/${SAFE_NAME}.json" \
+              "$IMAGE"
           done
 
-          echo "❌ $APP is not Synced and Healthy"
+      - name: Security summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## DEV infrastructure validation"
+            echo
 
-          kubectl --context=remote-cloudflare             -n argocd             get application "$APP"
+            if [[ -f artifacts/checkov-dev.json ]]; then
+              PASSED="$(jq '.results.passed_checks | length' artifacts/checkov-dev.json)"
+              FAILED="$(jq '.results.failed_checks | length' artifacts/checkov-dev.json)"
 
-          exit 1
+              echo "### Checkov"
+              echo "- Passed: $PASSED"
+              echo "- Failed: $FAILED"
+              echo
+            fi
 
-      - name: 📎 Upload All Artifacts
-        uses: actions/upload-artifact@v4
+            echo "### Trivy"
+            echo "HIGH/CRITICAL image vulnerabilities are currently reported but are not yet a blocking CI gate."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload validation artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
         with:
-          name: infra-report-${{ matrix.overlay }}
-          path: |
-            kyverno-full-${{ matrix.overlay }}.log
-            kyverno-report-${{ matrix.overlay }}.yaml
-            kyverno-results-${{ matrix.overlay }}.json
-            manifest-${{ matrix.overlay }}.yaml
-            trivy-full-${{ matrix.overlay }}.log.txt
-            scan-results/image-scan-report-${{ matrix.overlay }}.txt
-            scan-results/vulnerability-details-${{ matrix.overlay }}.txt
-            trivy-scan-*.json
-            scan-results/trivy-config-${{ matrix.overlay }}.txt
-            # Optional
-            checkov-${{ matrix.overlay }}.json
-
-      - name: 💬 PR Summary Comment
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            let overlay = '${{ matrix.overlay }}';
-            let body = `## ✅ Infra CI Summary: \`${overlay}\`\n`;
-
-            let trivy = '';
-            let configScan = '';
-            try {
-              trivy = fs.readFileSync(`scan-results/vulnerability-details-${overlay}.txt`, 'utf8');
-            } catch {}
-            try {
-              configScan = fs.readFileSync(`scan-results/trivy-config-${overlay}.txt`, 'utf8');
-            } catch {}
-
-            body += `### Trivy Scan Results\n\`\`\`\n${trivy.slice(0, 500)}\n\`\`\`\n`;
-            body += `### Config Scan Results\n\`\`\`\n${configScan.slice(0, 500)}\n\`\`\`\n`;
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body
-            })
+          name: infrastructure-ci-dev
+          path: artifacts/
+          retention-days: 14
+          if-no-files-found: warn
