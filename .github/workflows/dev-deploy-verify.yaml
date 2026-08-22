@@ -25,18 +25,43 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Install kubectl
-        run: scripts/install/install-kubectl.sh
+      - name: Install Kubernetes access CLI tools
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          scripts/install/install-kubectl.sh
+          scripts/install/install-cloudflared-access.sh
 
       - name: Restore Kubernetes access
+        env:
+          KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
+        shell: bash
         run: |
-          mkdir -p ~/.kube
+          set -euo pipefail
 
-          echo "${{ secrets.KUBE_CONFIG_DATA }}" \
+          if [[ -z "$KUBE_CONFIG_DATA" ]]; then
+            echo "ERROR: KUBE_CONFIG_DATA is not configured."
+            exit 1
+          fi
+
+          mkdir -p "$HOME/.kube"
+
+          printf '%s' "$KUBE_CONFIG_DATA" \
             | base64 --decode \
-            > ~/.kube/config
+            > "$HOME/.kube/config"
 
-          chmod 600 ~/.kube/config
+          chmod 600 "$HOME/.kube/config"
+
+      - name: Start Kubernetes Access tunnel
+        env:
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          scripts/access/start-k8s-api-proxy.sh
 
       - name: Wait for Argo CD deployment
         shell: bash
@@ -105,3 +130,8 @@ jobs:
             > /dev/null
 
           echo "DEV HTTP smoke test passed."
+
+      - name: Stop Kubernetes Access tunnel
+        if: always()
+        shell: bash
+        run: scripts/access/stop-k8s-api-proxy.sh
