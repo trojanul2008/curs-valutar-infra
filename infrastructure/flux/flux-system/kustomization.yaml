@@ -1,22 +1,10 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+
+# Minimal Flux platform composition for bootstrap and recovery.
+# Application-specific curs-valutar resources are owned by Argo CD and
+# must not be included in this composition.
+
 resources:
-  # 1) Platform/controllers (CRDs first, then controllers)
-  - manifests/flux-controllers.yaml            # flux controllers (including image controllers)
-  - manifests/external-secrets-install.yaml    # if this includes CRDs + controllers
-
-  # 2) Sources (GitRepository objects)
-  - manifests/source-dev.yaml                  # infra-dev GitRepository
-  # - manifests/source-prod.yaml               # only if you actually use a separate prod source
-
-  # 3) App environment Kustomizations (scoped to overlays)
-  - manifests/curs-valutar-dev.yaml
-  - manifests/curs-valutar-prod.yaml
-
-  # Optional: create separate automation kustomization
-  # For now these can remain if controllers are already present
-  - manifests/image-repository.yaml
-  - manifests/image-policy-dev.yaml
-  - manifests/image-policy.yaml
-  - manifests/image-update-automation-dev.yaml
-  - manifests/image-update-automation.yaml
+  - manifests/flux-controllers.yaml
+  - manifests/external-secrets-install.yaml
