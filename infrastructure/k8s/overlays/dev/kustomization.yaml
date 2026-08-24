@@ -10,4 +10,4 @@ patches:
 images:
   - name: trojanul2008/curs-valutar-app
     newName: trojanul2008/curs-valutar-app
-    digest: sha256:8f10b4ed01392d3c10f6b07210fdf5f38684d72f698a49ed0b1260b425a32f75
+    digest: sha256:1ff9219a181600d9d6e82d88d237d452b05fabeba49bc285f4ec9f67b7af7957
