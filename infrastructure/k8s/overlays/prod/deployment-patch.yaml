@@ -9,8 +9,6 @@ spec:
   replicas: 2
   template:
     spec:
-      imagePullSecrets:
-        - name: docker-credentials
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
