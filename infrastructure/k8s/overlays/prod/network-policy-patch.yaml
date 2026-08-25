@@ -1,0 +1,47 @@
+- op: replace
+  path: /spec
+  value:
+    podSelector:
+      matchLabels:
+        app: curs-valutar
+    policyTypes:
+      - Ingress
+      - Egress
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: traefik
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/name: traefik
+        ports:
+          - protocol: TCP
+            port: 5000
+    egress:
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: kube-system
+            podSelector:
+              matchLabels:
+                k8s-app: kube-dns
+        ports:
+          - protocol: UDP
+            port: 53
+          - protocol: TCP
+            port: 53
+      - to:
+          - ipBlock:
+              cidr: 0.0.0.0/0
+              except:
+                - 10.0.0.0/8
+                - 127.0.0.0/8
+                - 169.254.0.0/16
+                - 172.16.0.0/12
+                - 192.168.0.0/16
+                - 224.0.0.0/4
+                - 240.0.0.0/4
+        ports:
+          - protocol: TCP
+            port: 443

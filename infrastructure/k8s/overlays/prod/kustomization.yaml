@@ -3,10 +3,24 @@ kind: Kustomization
 namespace: prod
 resources:
   - ../../base
+  - namespace.yaml
+  - serviceaccount.yaml
 patches:
   - path: deployment-patch.yaml
   - path: ingress-patch.yaml
   - path: remove-affinity-patch.yaml
+  - path: service-account-patch.yaml
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: curs-valutar
+  - path: network-policy-patch.yaml
+    target:
+      group: networking.k8s.io
+      version: v1
+      kind: NetworkPolicy
+      name: allow-cross-namespace
 images:
   - name: trojanul2008/curs-valutar-app
     newName: trojanul2008/curs-valutar-app
