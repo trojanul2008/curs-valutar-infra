@@ -7,7 +7,6 @@ resources:
   - serviceaccount.yaml
 patches:
   - path: deployment-patch.yaml
-  - path: ingress-patch.yaml
   - path: remove-affinity-patch.yaml
   - path: service-account-patch.yaml
     target:
