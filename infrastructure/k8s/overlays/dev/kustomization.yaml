@@ -5,6 +5,9 @@ resources:
   - ../../base
   - namespace.yaml
   - serviceaccount.yaml
+  - private-issuer.yaml
+  - private-certificate.yaml
+  - private-route.yaml
 patches:
   - path: deployment-patch.yaml
   - path: remove-affinity-patch.yaml
