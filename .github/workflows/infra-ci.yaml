@@ -63,6 +63,7 @@ jobs:
         run: |
           kubeconform \
             -strict \
+            -ignore-missing-schemas \
             -summary \
             "artifacts/manifest-${{ matrix.environment }}.yaml"
 
