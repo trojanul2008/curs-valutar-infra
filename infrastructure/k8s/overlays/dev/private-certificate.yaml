@@ -1,0 +1,11 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: di-exchange-private
+spec:
+  secretName: di-exchange-private-tls
+  issuerRef:
+    name: letsencrypt-cloudflare
+    kind: Issuer
+  dnsNames:
+    - di-exchange.istartit.com

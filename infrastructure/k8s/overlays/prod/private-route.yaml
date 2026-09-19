@@ -1,0 +1,27 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: private-ip-allowlist
+spec:
+  ipAllowList:
+    sourceRange:
+      - 192.168.1.0/24
+      - 192.168.2.0/24
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: exchange-private
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`exchange.istartit.com`)
+      middlewares:
+        - name: private-ip-allowlist
+      services:
+        - name: curs-valutar
+          port: 80
+  tls:
+    secretName: exchange-private-tls
