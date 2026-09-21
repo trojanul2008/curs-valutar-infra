@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: icinga-host
+  namespace: argocd
+spec:
+  ports:
+    - name: http
+      port: 80
+      protocol: TCP
+      targetPort: 80
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: icinga-host-manual
+  namespace: argocd
+  labels:
+    kubernetes.io/service-name: icinga-host
+    endpointslice.kubernetes.io/managed-by: cluster-admins
+addressType: IPv4
+ports:
+  - name: http
+    protocol: TCP
+    port: 8081
+endpoints:
+  - addresses:
+      - 10.42.0.1
+    conditions:
+      ready: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: icinga-ip-allowlist
+  namespace: argocd
+spec:
+  ipAllowList:
+    sourceRange:
+      - 192.168.1.58/32
+      - 192.168.2.2/32
+      - 192.168.2.1/32
+      - 192.168.20.10/32
+      - 192.168.3.2/32
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: icinga-private
+  namespace: argocd
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`icinga.istartit.com`)
+      middlewares:
+        - name: icinga-ip-allowlist
+      services:
+        - name: icinga-host
+          port: 80
+  tls:
+    secretName: icinga-server-tls

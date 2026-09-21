@@ -87,4 +87,9 @@ echo "Applying Argo CD TLS certificate configuration..."
 kubectl apply \
   -f infrastructure/argocd/certificates/argocd-certificate.yaml
 
+echo "Applying private Icinga route..."
+
+kubectl apply \
+  -f infrastructure/argocd/networking/icinga-private-route.yaml
+
 echo "Argo CD configuration applied successfully."
