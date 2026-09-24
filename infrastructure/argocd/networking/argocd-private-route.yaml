@@ -11,6 +11,7 @@ spec:
       - 192.168.2.2/32
       - 192.168.2.1/32
       - 192.168.3.2/32
+      - 192.168.20.10/32
 ---
 apiVersion: traefik.io/v1alpha1
 kind: IngressRouteTCP
